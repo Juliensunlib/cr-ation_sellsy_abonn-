@@ -65,3 +65,34 @@ def sync_clients():
                 "third": third,
                 "contact": contact,
                 "address": address
+            })
+            print(f"[UPDATE] {nom} - {response}")
+        else:
+            # Création
+            response = sellsy_request("Client.create", {
+                "third": third,
+                "contact": contact,
+                "address": address
+            })
+
+            new_id = response.get("response", {}).get("client_id")
+            if new_id:
+                update_airtable_id(record["id"], new_id)
+                print(f"[CREATE] {nom} - ID {new_id}")
+            else:
+                print(f"[ERROR] Création client échouée - {response}")
+
+
+def update_airtable_id(record_id, client_id):
+    url = f"{AIRTABLE_URL}/{record_id}"
+    data = {
+        "fields": {
+            "ID_Sellsy": client_id
+        }
+    }
+    resp = requests.patch(url, headers=HEADERS, json=data)
+    print(f"[Airtable updated] {record_id} -> {client_id}")
+
+
+if __name__ == "__main__":
+    sync_clients()
