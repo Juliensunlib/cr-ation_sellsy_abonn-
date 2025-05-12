@@ -1,46 +1,50 @@
+import os
+import time
 import hashlib
 import hmac
-import time
+import base64
 import json
 import requests
-import uuid
-import os
-from dotenv import load_dotenv
+from urllib.parse import urlencode
 
-load_dotenv()
+# Clés API Sellsy V1 depuis les secrets GitHub
+CONSUMER_TOKEN = os.getenv("SELLSY_API_CONSUMER_TOKEN")
+CONSUMER_SECRET = os.getenv("SELLSY_API_CONSUMER_SECRET")
+USER_TOKEN = os.getenv("SELLSY_API_USER_TOKEN")
+USER_SECRET = os.getenv("SELLSY_API_USER_SECRET")
+
+SELLSY_API_URL = "https://apifeed.sellsy.com/0/"
 
 def sellsy_request(method, params):
-    url = "https://api.sellsy.com/method"
-
-    request = {
+    request_data = {
         'method': method,
         'params': params
     }
 
-    headers = {
-        'Content-Type': 'application/json'
-    }
-
-    oauth = {
-        'oauth_consumer_key': os.getenv("SELLSY_API_CONSUMER_TOKEN"),
-        'oauth_token': os.getenv("SELLSY_API_USER_TOKEN"),
-        'oauth_nonce': str(uuid.uuid4().hex),
-        'oauth_timestamp': str(int(time.time())),
+    # Construction du header OAuth1 manuellement
+    oauth_nonce = base64.b64encode(os.urandom(32)).decode('utf-8').rstrip('=')
+    oauth_timestamp = str(int(time.time()))
+    oauth_params = {
+        'oauth_consumer_key': CONSUMER_TOKEN,
+        'oauth_token': USER_TOKEN,
+        'oauth_nonce': oauth_nonce,
+        'oauth_timestamp': oauth_timestamp,
         'oauth_signature_method': 'HMAC-SHA1',
         'oauth_version': '1.0'
     }
 
-    base_str = "&".join([
-        "POST", 
-        requests.utils.quote(url, ""),
-        requests.utils.quote("&".join(f"{k}={oauth[k]}" for k in sorted(oauth)), "")
-    ])
+    # Construction de la base string
+    base_params = oauth_params.copy()
+    base_string = "POST&" + urlencode({'': SELLSY_API_URL})[1:] + "&" + urlencode(sorted(base_params.items()))
+    signing_key = f"{CONSUMER_SECRET}&{USER_SECRET}"
+    signature = base64.b64encode(hmac.new(signing_key.encode(), base_string.encode(), hashlib.sha1).digest()).decode()
+    oauth_params['oauth_signature'] = signature
 
-    signing_key = f"{os.getenv('SELLSY_API_CONSUMER_SECRET')}&{os.getenv('SELLSY_API_USER_SECRET')}"
-    signature = hmac.new(signing_key.encode(), base_str.encode(), hashlib.sha1).digest().hex()
-    oauth['oauth_signature'] = signature
+    auth_header = 'OAuth ' + ', '.join([f'{k}="{v}"' for k, v in oauth_params.items()])
+    headers = {
+        'Authorization': auth_header,
+        'Content-Type': 'application/json'
+    }
 
-    auth_header = "OAuth " + ", ".join(f'{k}="{v}"' for k, v in oauth.items())
-
-    response = requests.post(url, headers={**headers, 'Authorization': auth_header}, json=request)
+    response = requests.post(SELLSY_API_URL, headers=headers, data=json.dumps(request_data))
     return response.json()
