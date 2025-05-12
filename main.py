@@ -1,40 +1,67 @@
+import os
+import requests
 from sellsy_api import sellsy_request
-from airtable_api import get_airtable_records, update_airtable_record
+
+AIRTABLE_API_KEY = os.getenv("AIRTABLE_API_KEY")
+AIRTABLE_BASE_ID = os.getenv("AIRTABLE_BASE_ID")
+AIRTABLE_TABLE_NAME = os.getenv("AIRTABLE_TABLE_NAME")
+
+AIRTABLE_URL = f"https://api.airtable.com/v0/{AIRTABLE_BASE_ID}/{AIRTABLE_TABLE_NAME}"
+HEADERS = {
+    "Authorization": f"Bearer {AIRTABLE_API_KEY}",
+    "Content-Type": "application/json"
+}
+
+
+def get_airtable_records():
+    records = []
+    offset = None
+    while True:
+        params = {}
+        if offset:
+            params['offset'] = offset
+        resp = requests.get(AIRTABLE_URL, headers=HEADERS, params=params).json()
+        records.extend(resp.get("records", []))
+        offset = resp.get("offset")
+        if not offset:
+            break
+    return records
+
 
 def sync_clients():
     records = get_airtable_records()
     for record in records:
-        fields = record["fields"]
-        record_id = record["id"]
+        fields = record.get("fields", {})
+        client_id = fields.get("ID_Sellsy")
+        nom = fields.get("Nom")
+        prenom = fields.get("Prenom")
 
-        if "ID_Sellsy" not in fields:
-            params = {
-                "third": {
-                    "name": fields.get("Nom", ""),
-                    "type": "person",
-                    "email": fields.get("Email", ""),
-                    "tel": fields.get("Téléphone", "")
-                },
-                "contact": {
-                    "name": fields.get("Nom", ""),
-                    "forename": fields.get("Prenom", ""),
-                    "email": fields.get("Email", ""),
-                    "tel": fields.get("Téléphone", "")
-                },
-                "address": {
-                    "name": fields.get("Nom", ""),
-                    "part1": fields.get("Adresse complète", ""),
-                    "zip": str(fields.get("Code postal", "")),
-                    "town": fields.get("Ville", ""),
-                    "countrycode": "FR"
-                }
-            }
+        third = {
+            "name": f"{nom} {prenom}",
+            "email": fields.get("Email"),
+            "tel": fields.get("Téléphone"),
+            "type": "person"
+        }
 
-            result = sellsy_request("Client.create", params)
-            sellsy_id = result.get("response", {}).get("client_id")
+        contact = {
+            "name": nom,
+            "forename": prenom,
+            "email": fields.get("Email"),
+            "tel": fields.get("Téléphone")
+        }
 
-            if sellsy_id:
-                update_airtable_record(record_id, {"ID_Sellsy": sellsy_id})
+        address = {
+            "name": f"{nom} {prenom}",
+            "part1": fields.get("Adresse complète"),
+            "zip": str(fields.get("Code postal")),
+            "town": fields.get("Ville"),
+            "countrycode": "FR"
+        }
 
-if __name__ == "__main__":
-    sync_clients()
+        if client_id:
+            # Mise à jour
+            response = sellsy_request("Client.update", {
+                "clientid": client_id,
+                "third": third,
+                "contact": contact,
+                "address": address
