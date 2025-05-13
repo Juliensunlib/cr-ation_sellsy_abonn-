@@ -1,38 +1,36 @@
 import os
 import json
 import time
-import random
-import hashlib
 import requests
-import urllib.parse
 import logging
 from typing import Dict, List, Optional
+from datetime import datetime, timedelta
 
 class SellsyAPI:
     """
-    Client API pour Sellsy v1 basé sur l'authentification OAuth conforme à la documentation Sellsy.
+    Client API pour Sellsy v2 basé sur l'authentification OAuth 2.0.
     """
     
-    # URL de l'API selon la documentation
-    API_URL = "https://apifeed.sellsy.com/0"
-    REQ_TOKEN_URL = "https://apifeed.sellsy.com/0/request_token"
-    ACC_TOKEN_URL = "https://apifeed.sellsy.com/0/access_token"
+    # URL de l'API v2
+    API_BASE_URL = "https://api.sellsy.com/v2"
+    AUTH_URL = "https://login.sellsy.com/oauth2/access-token"
     
-    def __init__(self, consumer_token, consumer_secret, user_token, user_secret, logger=None):
+    def __init__(self, client_id, client_secret, access_token=None, refresh_token=None, logger=None):
         """
-        Initialise le client API Sellsy.
+        Initialise le client API Sellsy v2.
         
         Args:
-            consumer_token: Token de l'application
-            consumer_secret: Secret de l'application
-            user_token: Token utilisateur (pour application privée)
-            user_secret: Secret utilisateur (pour application privée)
+            client_id: Identifiant client OAuth 2.0
+            client_secret: Secret client OAuth 2.0
+            access_token: Token d'accès (optionnel)
+            refresh_token: Token de rafraîchissement (optionnel)
             logger: Logger pour journaliser les actions
         """
-        self.consumer_token = consumer_token
-        self.consumer_secret = consumer_secret
-        self.user_token = user_token
-        self.user_secret = user_secret
+        self.client_id = client_id
+        self.client_secret = client_secret
+        self.access_token = access_token
+        self.refresh_token = refresh_token
+        self.token_expires_at = None
         
         # Définir un logger par défaut si aucun n'est fourni
         if logger is None:
@@ -45,79 +43,174 @@ class SellsyAPI:
         else:
             self.logger = logger
         
-        self.logger.debug("SellsyAPI initialisée avec succès")
+        self.logger.debug("SellsyAPI v2 initialisée avec succès")
     
-    def request_api(self, request_settings: Dict) -> Optional[Dict]:
+    def _get_auth_header(self) -> Dict:
         """
-        Effectue une requête à l'API Sellsy en suivant la documentation officielle.
+        Obtient l'en-tête d'authentification pour les requêtes API.
+        
+        Returns:
+            En-tête d'authentification
+        """
+        if self._is_token_expired():
+            self.refresh_access_token()
+            
+        return {"Authorization": f"Bearer {self.access_token}"}
+    
+    def _is_token_expired(self) -> bool:
+        """
+        Vérifie si le token d'accès est expiré.
+        
+        Returns:
+            True si le token est expiré ou non défini, False sinon
+        """
+        if not self.access_token or not self.token_expires_at:
+            return True
+            
+        return datetime.now() >= self.token_expires_at
+    
+    def get_access_token(self) -> bool:
+        """
+        Obtient un nouveau token d'accès en utilisant le flux d'authentification client credentials.
+        
+        Returns:
+            True si l'obtention du token a réussi, False sinon
+        """
+        try:
+            self.logger.info("🔄 Obtention d'un nouveau token d'accès...")
+            
+            payload = {
+                "grant_type": "client_credentials",
+                "client_id": self.client_id,
+                "client_secret": self.client_secret
+            }
+            
+            response = requests.post(self.AUTH_URL, data=payload)
+            
+            if response.status_code == 200:
+                data = response.json()
+                self.access_token = data["access_token"]
+                # Calcul de la date d'expiration (généralement 3600 secondes)
+                expires_in = data.get("expires_in", 3600)
+                self.token_expires_at = datetime.now() + timedelta(seconds=expires_in - 60)  # -60 pour marge de sécurité
+                
+                self.logger.info(f"✅ Token d'accès obtenu avec succès (expire dans {expires_in} secondes)")
+                return True
+            else:
+                self.logger.error(f"❌ Échec d'obtention du token: {response.status_code}")
+                self.logger.error(f"Détails: {response.text}")
+                return False
+                
+        except Exception as e:
+            self.logger.error(f"❌ Erreur lors de l'obtention du token: {str(e)}")
+            return False
+    
+    def refresh_access_token(self) -> bool:
+        """
+        Rafraîchit le token d'accès en utilisant le token de rafraîchissement.
+        
+        Returns:
+            True si le rafraîchissement a réussi, False sinon
+        """
+        if self.refresh_token:
+            try:
+                self.logger.info("🔄 Rafraîchissement du token d'accès...")
+                
+                payload = {
+                    "grant_type": "refresh_token",
+                    "client_id": self.client_id,
+                    "client_secret": self.client_secret,
+                    "refresh_token": self.refresh_token
+                }
+                
+                response = requests.post(self.AUTH_URL, data=payload)
+                
+                if response.status_code == 200:
+                    data = response.json()
+                    self.access_token = data["access_token"]
+                    self.refresh_token = data["refresh_token"]
+                    expires_in = data.get("expires_in", 3600)
+                    self.token_expires_at = datetime.now() + timedelta(seconds=expires_in - 60)
+                    
+                    self.logger.info(f"✅ Token d'accès rafraîchi avec succès")
+                    return True
+                else:
+                    self.logger.error(f"❌ Échec du rafraîchissement du token: {response.status_code}")
+                    return False
+                    
+            except Exception as e:
+                self.logger.error(f"❌ Erreur lors du rafraîchissement du token: {str(e)}")
+                return False
+        else:
+            # Si pas de refresh_token, on utilise le flux client credentials
+            return self.get_access_token()
+    
+    def request_api(self, method: str, endpoint: str, data: Dict = None, params: Dict = None) -> Optional[Dict]:
+        """
+        Effectue une requête à l'API Sellsy v2.
         
         Args:
-            request_settings: Paramètres de la requête (méthode et paramètres)
+            method: Méthode HTTP (GET, POST, PUT, DELETE)
+            endpoint: Point de terminaison API (sans le préfixe de base)
+            data: Données à envoyer (pour POST/PUT)
+            params: Paramètres de requête (pour GET)
             
         Returns:
             Réponse de l'API ou None en cas d'erreur
         """
         try:
-            # Vérification que les tokens sont présents
-            if not all([self.consumer_token, self.consumer_secret, self.user_token, self.user_secret]):
-                self.logger.error("❌ Authentification incomplète: tokens/secrets manquants")
-                return None
+            # S'assurer que nous avons un token valide
+            if self._is_token_expired():
+                if not self.get_access_token():
+                    self.logger.error("❌ Impossible d'obtenir un token d'accès valide")
+                    return None
             
-            # Préparation des paramètres OAuth
-            oauth_params = self._prepare_oauth_params()
+            # Préparation de l'URL
+            url = f"{self.API_BASE_URL}/{endpoint.lstrip('/')}"
             
-            # Préparation du corps de la requête
-            request_data = {
-                'request': 1,
-                'io_mode': 'json',
-                'do_in': json.dumps(request_settings)
+            # Préparation des en-têtes
+            headers = {
+                "Authorization": f"Bearer {self.access_token}",
+                "Content-Type": "application/json",
+                "Accept": "application/json"
             }
             
-            # Fusion des paramètres OAuth et des données de requête
-            data = {**oauth_params, **request_data}
+            self.logger.debug(f"Requête API v2: {method} {url}")
+            if data:
+                self.logger.debug(f"Données: {json.dumps(data)[:200]}...")
+            if params:
+                self.logger.debug(f"Paramètres: {params}")
             
-            # Log des données sensibles masquées
-            debug_data = data.copy()
-            if 'oauth_signature' in debug_data:
-                debug_data['oauth_signature'] = '******'
-            if 'oauth_consumer_key' in debug_data:
-                debug_data['oauth_consumer_key'] = '***'
-            if 'oauth_token' in debug_data:
-                debug_data['oauth_token'] = '***'
-            
-            self.logger.debug(f"Requête API: URL={self.API_URL}")
-            self.logger.debug(f"Données de requête: {debug_data}")
-            
-            # Envoi de la requête POST
-            response = requests.post(
-                self.API_URL,
-                data=data
+            # Exécution de la requête
+            response = requests.request(
+                method=method,
+                url=url,
+                headers=headers,
+                json=data if data else None,
+                params=params if params else None
             )
             
             # Vérification du statut de la réponse
-            if response.status_code != 200:
+            if response.status_code in [200, 201, 202, 204]:
+                try:
+                    if response.content:
+                        result = response.json()
+                        self.logger.debug(f"Réponse reçue: {json.dumps(result)[:200]}...")
+                        return result
+                    return {"status": "success"}
+                except json.JSONDecodeError:
+                    self.logger.error(f"❌ Réponse non-JSON: {response.text[:200]}")
+                    return None
+            elif response.status_code == 401:
+                # Token expiré ou invalide, on tente de rafraîchir
+                self.logger.warning("⚠️ Token d'accès expiré. Tentative de rafraîchissement...")
+                if self.refresh_access_token():
+                    # On réessaie la requête avec le nouveau token
+                    return self.request_api(method, endpoint, data, params)
+                return None
+            else:
                 self.logger.error(f"❌ Erreur HTTP: {response.status_code}")
                 self.logger.error(f"Détails: {response.text}")
-                
-                # Vérifier s'il s'agit d'une erreur OAuth spécifique
-                if "oauth_problem" in response.text:
-                    self.logger.error(f"❌ Erreur OAuth: {response.text}")
-                return None
-            
-            # Traitement de la réponse
-            try:
-                result = response.json()
-                
-                # Vérification des erreurs dans la réponse JSON
-                if isinstance(result, dict):
-                    if result.get('status') == 'error':
-                        self.logger.error(f"❌ Erreur API: {result.get('error')}")
-                        return result
-                
-                self.logger.debug(f"Réponse reçue: {json.dumps(result)[:200]}...")
-                return result
-            except json.JSONDecodeError:
-                self.logger.error(f"❌ Réponse non-JSON: {response.text[:200]}")
                 return None
                 
         except requests.RequestException as e:
@@ -128,103 +221,6 @@ class SellsyAPI:
             self.logger.exception("Détails:")
             return None
     
-    def _prepare_oauth_params(self) -> Dict:
-        """
-        Prépare les paramètres OAuth conformément à la documentation Sellsy.
-        
-        Returns:
-            Paramètres OAuth
-        """
-        # Génération des valeurs OAuth requises
-        nonce = str(random.getrandbits(64))
-        timestamp = str(int(time.time()))
-        
-        # Correction pour l'authentification Sellsy:
-        # La signature doit être au format "&" (deux valeurs séparées par &)
-        # Pour une application privée, c'est consumer_secret&user_secret
-        # Sans encodage URL
-        signature = f"{self.consumer_secret}&{self.user_secret}"
-        
-        # Paramètres OAuth
-        oauth_params = {
-            'oauth_consumer_key': self.consumer_token,
-            'oauth_token': self.user_token,
-            'oauth_signature_method': 'PLAINTEXT',
-            'oauth_signature': signature,
-            'oauth_timestamp': timestamp,
-            'oauth_nonce': nonce,
-            'oauth_version': '1.0'
-        }
-        
-        return oauth_params
-    
-    def create_client(self, client_data: Dict) -> Optional[Dict]:
-        """
-        Crée un nouveau client dans Sellsy.
-        
-        Args:
-            client_data: Données du client à créer (format v2)
-            
-        Returns:
-            Réponse de l'API ou None en cas d'erreur
-        """
-        self.logger.info("🔄 Création d'un nouveau client dans Sellsy")
-        
-        try:
-            # Conversion des données client au format v1
-            v1_client_data = self._convert_v2_to_v1_format(client_data)
-            
-            # Préparation de la requête
-            request_settings = {
-                "method": "Client.create",
-                "params": v1_client_data
-            }
-            
-            # Exécution de la requête
-            self.logger.debug(f"Données client formatées: {v1_client_data}")
-            response = self.request_api(request_settings)
-            
-            if response and response.get('status') == 'success':
-                # Extraction de l'ID client de la réponse
-                client_id = response.get('response')
-                self.logger.info(f"✅ Client créé avec succès! ID: {client_id}")
-                return {"status": "success", "response": client_id}
-            else:
-                error_msg = "Réponse API invalide"
-                if response and 'error' in response:
-                    error_msg = response.get('error')
-                self.logger.error(f"❌ Échec de création du client: {error_msg}")
-                return response
-                
-        except Exception as e:
-            self.logger.error(f"❌ Erreur lors de la création du client: {str(e)}")
-            self.logger.exception("Détails:")
-            return None
-    
-    def _convert_v2_to_v1_format(self, v2_data: Dict) -> Dict:
-        """
-        Convertit les données client du format v2 au format v1 attendu par l'API.
-        
-        Args:
-            v2_data: Données client au format v2
-            
-        Returns:
-            Données client au format v1
-        """
-        # Extraction des données depuis la structure attendue
-        third = v2_data.get("third", {})
-        contact = v2_data.get("contact", {})
-        address = v2_data.get("address", {})
-        
-        # Construction des données au format v1
-        v1_data = {
-            "third": third,
-            "contact": contact,
-            "address": address
-        }
-        
-        return v1_data
-    
     def test_authentication(self) -> bool:
         """
         Teste l'authentification en récupérant les informations sur l'API.
@@ -232,17 +228,13 @@ class SellsyAPI:
         Returns:
             True si l'authentification est réussie, False sinon
         """
-        self.logger.info("🔄 Test d'authentification Sellsy...")
+        self.logger.info("🔄 Test d'authentification Sellsy v2...")
         
         try:
-            # Appel à une méthode simple pour tester l'authentification
-            request_settings = {
-                "method": "Infos.getInfos"
-            }
+            # Récupération du compte utilisateur pour tester l'authentification
+            response = self.request_api("GET", "/myself")
             
-            response = self.request_api(request_settings)
-            
-            if response and response.get('status') == 'success':
+            if response:
                 self.logger.info("✅ Authentification réussie!")
                 return True
             else:
@@ -253,40 +245,125 @@ class SellsyAPI:
             self.logger.error(f"❌ Erreur lors du test d'authentification: {str(e)}")
             return False
     
-    def get_client(self, client_id: str) -> Optional[Dict]:
+    def create_client(self, client_data: Dict) -> Optional[Dict]:
+        """
+        Crée un nouveau client dans Sellsy.
+        
+        Args:
+            client_data: Données du client à créer
+            
+        Returns:
+            Réponse de l'API ou None en cas d'erreur
+        """
+        self.logger.info("🔄 Création d'un nouveau client dans Sellsy v2")
+        
+        try:
+            # Conversion du format des données pour l'API v2
+            v2_client_data = self._prepare_client_data_for_v2(client_data)
+            
+            # API v2 utilise différents endpoints pour individus et entreprises
+            is_individual = client_data.get("third", {}).get("type") == "person"
+            
+            if is_individual:
+                endpoint = "/individuals"
+            else:
+                endpoint = "/companies"
+            
+            # Exécution de la requête
+            self.logger.debug(f"Données client formatées pour v2: {v2_client_data}")
+            response = self.request_api("POST", endpoint, v2_client_data)
+            
+            if response:
+                # Extraction de l'ID client de la réponse
+                client_id = response.get("id")
+                self.logger.info(f"✅ Client créé avec succès! ID: {client_id}")
+                return {"status": "success", "response": client_id}
+            else:
+                self.logger.error("❌ Échec de création du client")
+                return {"status": "error", "error": "Échec de création du client"}
+                
+        except Exception as e:
+            self.logger.error(f"❌ Erreur lors de la création du client: {str(e)}")
+            self.logger.exception("Détails:")
+            return {"status": "error", "error": str(e)}
+    
+    def _prepare_client_data_for_v2(self, old_data: Dict) -> Dict:
+        """
+        Convertit les données client du format v1 au format v2 attendu par l'API.
+        
+        Args:
+            old_data: Données client au format v1
+            
+        Returns:
+            Données client au format v2
+        """
+        # Extraction des données de l'ancien format
+        third = old_data.get("third", {})
+        contact = old_data.get("contact", {})
+        address = old_data.get("address", {})
+        
+        # Déterminer si c'est un particulier ou une entreprise
+        is_individual = third.get("type") == "person"
+        
+        if is_individual:
+            # Format pour les particuliers (individuals)
+            result = {
+                "name": contact.get("firstname", ""),
+                "last_name": contact.get("name", ""),
+                "email": contact.get("email", ""),
+                "phone_number": contact.get("tel", ""),
+                "civil": {
+                    "civil": "mr" if contact.get("civility") == "man" else "mrs"
+                },
+                "addresses": []
+            }
+        else:
+            # Format pour les entreprises (companies)
+            result = {
+                "name": third.get("name", ""),
+                "email": third.get("email", ""),
+                "phone_number": third.get("tel", ""),
+                "note": third.get("notes", ""),
+                "addresses": []
+            }
+        
+        # Ajout de l'adresse si présente
+        if address:
+            new_address = {
+                "name": address.get("name", "Adresse principale"),
+                "address": address.get("part1", ""),
+                "zip_code": address.get("zip", ""),
+                "city": address.get("town", ""),
+                "country_code": address.get("countrycode", "FR")
+            }
+            result["addresses"].append(new_address)
+        
+        # Ajout du contact pour les entreprises
+        if not is_individual and contact:
+            result["contacts"] = [{
+                "first_name": contact.get("firstname", ""),
+                "last_name": contact.get("name", ""),
+                "email": contact.get("email", ""),
+                "phone_number": contact.get("tel", "")
+            }]
+        
+        return result
+    
+    def get_client(self, client_id: str, is_individual: bool = False) -> Optional[Dict]:
         """
         Récupère les informations d'un client par son ID.
         
         Args:
             client_id: ID du client à récupérer
+            is_individual: True si le client est un particulier, False sinon
             
         Returns:
             Informations du client ou None en cas d'erreur
         """
+        endpoint = f"/individuals/{client_id}" if is_individual else f"/companies/{client_id}"
         self.logger.info(f"🔄 Récupération du client ID: {client_id}")
         
-        try:
-            # Préparation de la requête
-            request_settings = {
-                "method": "Client.getOne",
-                "params": {
-                    "clientid": client_id
-                }
-            }
-            
-            # Exécution de la requête
-            response = self.request_api(request_settings)
-            
-            if response and response.get('status') == 'success':
-                self.logger.info(f"✅ Client récupéré avec succès")
-                return response
-            else:
-                self.logger.error(f"❌ Échec de récupération du client")
-                return response
-                
-        except Exception as e:
-            self.logger.error(f"❌ Erreur lors de la récupération du client: {str(e)}")
-            return None
+        return self.request_api("GET", endpoint)
     
     def search_clients(self, search_term=None, limit=100) -> Optional[Dict]:
         """
@@ -301,35 +378,22 @@ class SellsyAPI:
         """
         self.logger.info(f"🔄 Recherche de clients" + (f" avec terme: {search_term}" if search_term else ""))
         
-        try:
-            # Préparation de la requête
-            request_settings = {
-                "method": "Client.getList",
-                "params": {
-                    "pagination": {
-                        "nbperpage": limit,
-                        "pagenum": 1
-                    }
-                }
-            }
-            
-            # Ajout du terme de recherche si fourni
-            if search_term:
-                request_settings["params"]["search"] = {
-                    "contains": search_term
-                }
-            
-            # Exécution de la requête
-            response = self.request_api(request_settings)
-            
-            if response and response.get('status') == 'success':
-                result_count = len(response.get('response', {}).get('result', {}))
-                self.logger.info(f"✅ {result_count} clients trouvés")
-                return response
-            else:
-                self.logger.error(f"❌ Échec de la recherche de clients")
-                return response
-                
-        except Exception as e:
-            self.logger.error(f"❌ Erreur lors de la recherche de clients: {str(e)}")
-            return None
+        # Paramètres de recherche
+        params = {
+            "limit": limit,
+            "offset": 0
+        }
+        
+        if search_term:
+            params["search"] = search_term
+        
+        # Recherche dans les entreprises et particuliers
+        companies = self.request_api("GET", "/companies", params=params) or {"data": []}
+        individuals = self.request_api("GET", "/individuals", params=params) or {"data": []}
+        
+        # Combiner les résultats
+        results = []
+        results.extend(companies.get("data", []))
+        results.extend(individuals.get("data", []))
+        
+        return {"data": results[:limit]}
