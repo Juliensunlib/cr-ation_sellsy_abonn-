@@ -5,6 +5,7 @@ import random
 import hashlib
 import requests
 from typing import Dict, Optional
+import urllib.parse
 
 class SellsyAPI:
     """API client pour Sellsy v1."""
@@ -28,6 +29,9 @@ class SellsyAPI:
         nonce = str(random.getrandbits(64))
         timestamp = str(int(time.time()))
         
+        # La signature doit être correctement échappée selon les spécifications OAuth
+        signature = urllib.parse.quote(self.consumer_secret) + '&' + urllib.parse.quote(self.user_secret)
+        
         oauth_params = {
             'oauth_consumer_key': self.consumer_token,
             'oauth_token': self.user_token,
@@ -35,7 +39,7 @@ class SellsyAPI:
             'oauth_timestamp': timestamp,
             'oauth_signature_method': 'PLAINTEXT',
             'oauth_version': '1.0',
-            'oauth_signature': f"{self.consumer_secret}&{self.user_secret}"
+            'oauth_signature': signature
         }
         
         return oauth_params
@@ -64,9 +68,7 @@ class SellsyAPI:
             # Affichage des détails pour le débogage (ne pas inclure les secrets complets)
             safe_oauth = oauth_params.copy()
             if 'oauth_signature' in safe_oauth:
-                signature_parts = safe_oauth['oauth_signature'].split('&')
-                if len(signature_parts) == 2:
-                    safe_oauth['oauth_signature'] = f"{signature_parts[0][:3]}...&{signature_parts[1][:3]}..."
+                safe_oauth['oauth_signature'] = "***SIGNATURE-HIDDEN***"
             self.logger.debug(f"OAuth params: {safe_oauth}")
             self.logger.debug(f"Request data: {request_data}")
             
@@ -79,14 +81,19 @@ class SellsyAPI:
             
             # Enregistrement de la réponse brute pour débogage
             self.logger.debug(f"Status code: {response.status_code}")
-            self.logger.debug(f"Response headers: {response.headers}")
-            self.logger.debug(f"Response content: {response.text[:200]}...")  # Limiter pour ne pas surcharger les logs
+            self.logger.debug(f"Response headers: {dict(response.headers)}")
+            self.logger.debug(f"Response content: {response.text[:500]}")  # Montrer plus de contenu pour le débogage
             
             # Vérification de la réponse
             response.raise_for_status()
             
-            # Conversion de la réponse en JSON
-            result = response.json()
+            # Tentative de conversion de la réponse en JSON
+            # Si la réponse n'est pas du JSON valide, traitons-la comme une erreur
+            try:
+                result = response.json()
+            except ValueError:
+                self.logger.error(f"❌ Réponse non-JSON: {response.text}")
+                return None
             
             # Vérification des erreurs dans la réponse
             if isinstance(result, dict) and "error" in result:
@@ -99,7 +106,7 @@ class SellsyAPI:
             self.logger.error(f"❌ Erreur lors de la requête à l'API Sellsy: {str(e)}")
             if hasattr(e, 'response') and e.response:
                 self.logger.error(f"Status code: {e.response.status_code}")
-                self.logger.error(f"Détails: {e.response.text}")
+                self.logger.error(f"Détails: {response.text if 'response' in locals() else 'Pas de réponse'}")
             return None
         except ValueError as e:
             # Erreur lors du décodage JSON
