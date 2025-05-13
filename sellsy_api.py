@@ -407,8 +407,8 @@ class SellsyAPI:
                 "civil": {
                     "civil": "mr" if contact.get("civility") == "man" else "mrs"
                 },
-                "addresses": []
-                # Suppression du champ 'type' qui est invalide pour les individuals
+                "addresses": [],
+                "type": "client"  # Ajout du champ 'type' manquant qui était la cause de l'erreur
             }
         else:
             # Format pour les entreprises (companies)
