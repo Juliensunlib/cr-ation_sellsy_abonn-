@@ -54,6 +54,7 @@ class Config:
     AIRTABLE_BASE_ID = os.environ.get("AIRTABLE_BASE_ID")
     AIRTABLE_TABLE_NAME = os.environ.get("AIRTABLE_TABLE_NAME")
     
+    # Utiliser les variables pour l'API Sellsy v1
     SELLSY_API_CONSUMER_TOKEN = os.environ.get("SELLSY_API_CONSUMER_TOKEN")
     SELLSY_API_CONSUMER_SECRET = os.environ.get("SELLSY_API_CONSUMER_SECRET")
     SELLSY_API_USER_TOKEN = os.environ.get("SELLSY_API_USER_TOKEN")
@@ -70,6 +71,7 @@ class ClientSynchronizer:
             Config.AIRTABLE_TABLE_NAME
         )
         
+        # Initialisation avec l'API Sellsy v1
         self.sellsy_api = SellsyAPI(
             Config.SELLSY_API_CONSUMER_TOKEN,
             Config.SELLSY_API_CONSUMER_SECRET,
@@ -117,7 +119,7 @@ class ClientSynchronizer:
             logger.warning(f"⚠️ Format d'email invalide: {email}")
             return None
         
-        # Format pour l'API Sellsy v2
+        # Format en suivant le format v2 pour être converti en format v1 dans l'API Sellsy
         client_data = {
             "type": "person",
             "name": f"{nom} {prenom}",
