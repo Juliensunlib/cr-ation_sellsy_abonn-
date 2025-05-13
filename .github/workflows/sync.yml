@@ -23,6 +23,10 @@ jobs:
           python -m pip install --upgrade pip
           pip install -r requirements.txt
 
+      - name: Initialize Sellsy OAuth2 tokens
+        run: |
+          python init_sellsy_tokens.py --client_id "${{ secrets.SELLSY_CLIENT_ID }}" --client_secret "${{ secrets.SELLSY_CLIENT_SECRET }}" --update_env
+        
       - name: Run client sync script
         env:
           AIRTABLE_API_KEY: ${{ secrets.AIRTABLE_API_KEY }}
@@ -30,6 +34,4 @@ jobs:
           AIRTABLE_TABLE_NAME: ${{ secrets.AIRTABLE_TABLE_NAME }}
           SELLSY_CLIENT_ID: ${{ secrets.SELLSY_CLIENT_ID }}
           SELLSY_CLIENT_SECRET: ${{ secrets.SELLSY_CLIENT_SECRET }}
-          SELLSY_ACCESS_TOKEN: ${{ secrets.SELLSY_ACCESS_TOKEN }}
-          SELLSY_REFRESH_TOKEN: ${{ secrets.SELLSY_REFRESH_TOKEN }}
         run: python main.py
