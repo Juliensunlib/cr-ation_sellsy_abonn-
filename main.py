@@ -1,11 +1,13 @@
 import os
 import sys
 import time
+import json
 import requests
 import logging
 from logging.handlers import RotatingFileHandler
 from typing import Dict, List, Optional
 from datetime import datetime
+from requests_oauthlib import OAuth1
 
 def setup_logging():
     log_dir = 'logs'
@@ -132,21 +134,7 @@ class SellsyAPI:
         """Effectue une requête à l'API Sellsy."""
         logger.info(f"📤 Envoi de la requête Sellsy : {method}")
         
-        headers = {
-            "Content-Type": "application/json"
-        }
-        
-        oauth_data = {
-            "request": 1,
-            "io_mode": "json",
-            "do_in": {
-                "method": method,
-                "params": params
-            }
-        }
-        
-        # Utilisation de l'authentification OAuth1
-        from requests_oauthlib import OAuth1
+        # Création de l'authentification OAuth1
         oauth = OAuth1(
             Config.SELLSY_API_CONSUMER_TOKEN,
             Config.SELLSY_API_CONSUMER_SECRET,
@@ -227,20 +215,40 @@ class ClientSynchronizer:
             # Création du client dans Sellsy
             response = SellsyAPI.make_request("Client.create", {"third": client_data})
 
-            if response and response.get("status") == "success":
-                client_id = response.get('response', {}).get('client_id')
-                if client_id:
-                    logger.info(f"✅ Client créé avec succès dans Sellsy. ID: {client_id}")
-                    # Mise à jour d'Airtable avec le nouvel ID Sellsy
-                    AirtableAPI.update_record(record['id'], {'ID_Sellsy': str(client_id)})
+            if response:
+                # Vérification de la réponse
+                if response.get("status") == "success" or "client_id" in str(response):
+                    client_id = None
+                    
+                    # Extraction de l'ID client selon la structure de la réponse
+                    if "response" in response and isinstance(response["response"], dict):
+                        client_id = response["response"].get("client_id")
+                    elif "result" in response and isinstance(response["result"], dict):
+                        client_id = response["result"].get("client_id")
+                    
+                    # Fallback: essayons de trouver un ID dans n'importe quelle clé de la réponse
+                    if not client_id:
+                        for key, value in response.items():
+                            if isinstance(value, dict) and "id" in value:
+                                client_id = value.get("id")
+                                break
+                    
+                    if client_id:
+                        logger.info(f"✅ Client créé avec succès dans Sellsy. ID: {client_id}")
+                        # Mise à jour d'Airtable avec le nouvel ID Sellsy
+                        AirtableAPI.update_record(record['id'], {'ID_Sellsy': str(client_id)})
+                    else:
+                        logger.error(f"❌ Impossible de trouver l'ID client dans la réponse: {response}")
                 else:
-                    logger.error("❌ Le client n'a pas été créé dans Sellsy (Pas d'ID retourné).")
+                    error_msg = response.get("error", "Réponse inconnue")
+                    logger.error(f"🚨 Échec de la synchronisation du client: {error_msg}")
+                    logger.debug(f"Réponse complète: {response}")
             else:
-                error_msg = response.get("error", "Réponse inconnue") if response else "Pas de réponse"
-                logger.error(f"🚨 Échec de la synchronisation du client: {error_msg}")
+                logger.error("🚨 Pas de réponse de l'API Sellsy")
         
         except Exception as e:
-            logger.error(f"❌ Erreur lors de la synchronisation : {e}")
+            logger.error(f"❌ Erreur lors de la synchronisation : {str(e)}")
+            logger.exception("Détails de l'erreur:")
 
 def main():
     """Fonction principale de synchronisation."""
