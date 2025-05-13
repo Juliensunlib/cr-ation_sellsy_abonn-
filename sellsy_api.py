@@ -407,7 +407,9 @@ class SellsyAPI:
                 "civil": {
                     "civil": "mr" if contact.get("civility") == "man" else "mrs"
                 },
-                "addresses": []
+                "addresses": [],
+                # Ajout du champ type obligatoire pour l'API v2
+                "type": "person"
             }
         else:
             # Format pour les entreprises (companies)
@@ -416,7 +418,9 @@ class SellsyAPI:
                 "email": third.get("email", ""),
                 "phone_number": third.get("tel", ""),
                 "note": third.get("notes", ""),
-                "addresses": []
+                "addresses": [],
+                # Ajout du champ type obligatoire pour l'API v2
+                "type": "prospect"  
             }
         
         # Ajout de l'adresse si présente
