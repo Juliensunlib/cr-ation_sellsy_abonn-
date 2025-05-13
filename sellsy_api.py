@@ -14,7 +14,7 @@ class SellsyAPI:
     # URL de l'API v2
     API_BASE_URL = "https://api.sellsy.com/v2"
     # URL correcte pour l'authentification OAuth2 de Sellsy v2
-    AUTH_URL = "https://api.sellsy.com/oauth2/access-token"
+    AUTH_URL = "https://login.sellsy.com/oauth2/access-tokens"
     
     def __init__(self, client_id, client_secret, access_token=None, refresh_token=None, logger=None):
         """
@@ -80,17 +80,16 @@ class SellsyAPI:
         try:
             self.logger.info("🔄 Obtention d'un nouveau token d'accès...")
             
-            # En-têtes pour l'authentification Basic
-            auth = (self.client_id, self.client_secret)
-            
-            # Paramètres de la requête - Correction du format pour applications OAuth2
+            # Préparation du payload pour la requête
             payload = {
-                "grant_type": "client_credentials"
+                "grant_type": "client_credentials",
+                "client_id": self.client_id,
+                "client_secret": self.client_secret
             }
             
             # En-têtes pour spécifier le type de contenu
             headers = {
-                "Content-Type": "application/x-www-form-urlencoded",
+                "Content-Type": "application/json",
                 "Accept": "application/json"
             }
             
@@ -101,8 +100,7 @@ class SellsyAPI:
             # Requête avec gestion explicite des timeouts et vérification SSL
             response = requests.post(
                 self.AUTH_URL, 
-                auth=auth,
-                data=payload,  # Utiliser data au lieu de json pour application/x-www-form-urlencoded
+                json=payload,
                 headers=headers,
                 timeout=30,
                 verify=True
@@ -116,10 +114,8 @@ class SellsyAPI:
                 try:
                     data = response.json()
                     self.access_token = data["access_token"]
-                    # Le refresh token est généralement fourni avec le grant_type=authorization_code
-                    if "refresh_token" in data:
-                        self.refresh_token = data["refresh_token"]
-                    # Calcul de la date d'expiration (généralement 3600 secondes)
+                    # Le refresh token n'est pas fourni avec client_credentials
+                    # Calcul de la date d'expiration
                     expires_in = data.get("expires_in", 3600)
                     self.token_expires_at = datetime.now() + timedelta(seconds=expires_in - 60)  # -60 pour marge de sécurité
                     
@@ -162,22 +158,21 @@ class SellsyAPI:
             try:
                 self.logger.info("🔄 Rafraîchissement du token d'accès...")
                 
-                auth = (self.client_id, self.client_secret)
-                
                 payload = {
                     "grant_type": "refresh_token",
+                    "client_id": self.client_id,
+                    "client_secret": self.client_secret,
                     "refresh_token": self.refresh_token
                 }
                 
                 headers = {
-                    "Content-Type": "application/x-www-form-urlencoded",
+                    "Content-Type": "application/json",
                     "Accept": "application/json"
                 }
                 
                 response = requests.post(
                     self.AUTH_URL, 
-                    auth=auth,
-                    data=payload,  # Utiliser data au lieu de json pour application/x-www-form-urlencoded
+                    json=payload,
                     headers=headers,
                     timeout=30
                 )
