@@ -54,11 +54,11 @@ class Config:
     AIRTABLE_BASE_ID = os.environ.get("AIRTABLE_BASE_ID")
     AIRTABLE_TABLE_NAME = os.environ.get("AIRTABLE_TABLE_NAME")
     
-    # Utiliser les variables pour l'API Sellsy v1
-    SELLSY_API_CONSUMER_TOKEN = os.environ.get("SELLSY_API_CONSUMER_TOKEN")
-    SELLSY_API_CONSUMER_SECRET = os.environ.get("SELLSY_API_CONSUMER_SECRET")
-    SELLSY_API_USER_TOKEN = os.environ.get("SELLSY_API_USER_TOKEN")
-    SELLSY_API_USER_SECRET = os.environ.get("SELLSY_API_USER_SECRET")
+    # Variables pour l'API Sellsy V2 (OAuth 2.0)
+    SELLSY_CLIENT_ID = os.environ.get("SELLSY_CLIENT_ID")
+    SELLSY_CLIENT_SECRET = os.environ.get("SELLSY_CLIENT_SECRET")
+    SELLSY_ACCESS_TOKEN = os.environ.get("SELLSY_ACCESS_TOKEN", None)  # Optionnel
+    SELLSY_REFRESH_TOKEN = os.environ.get("SELLSY_REFRESH_TOKEN", None)  # Optionnel
 
 class ClientSynchronizer:
     """Classe pour synchroniser les clients entre Airtable et Sellsy."""
@@ -70,10 +70,8 @@ class ClientSynchronizer:
             Config.AIRTABLE_API_KEY, 
             Config.AIRTABLE_BASE_ID, 
             Config.AIRTABLE_TABLE_NAME,
-            Config.SELLSY_API_CONSUMER_TOKEN,
-            Config.SELLSY_API_CONSUMER_SECRET,
-            Config.SELLSY_API_USER_TOKEN,
-            Config.SELLSY_API_USER_SECRET
+            Config.SELLSY_CLIENT_ID,
+            Config.SELLSY_CLIENT_SECRET
         ]):
             logger.error("❌ Paramètres de configuration manquants")
             raise ValueError("Configuration incomplète")
@@ -84,12 +82,12 @@ class ClientSynchronizer:
             Config.AIRTABLE_TABLE_NAME
         )
         
-        # Initialisation avec l'API Sellsy v1
+        # Initialisation avec l'API Sellsy v2
         self.sellsy_api = SellsyAPI(
-            Config.SELLSY_API_CONSUMER_TOKEN,
-            Config.SELLSY_API_CONSUMER_SECRET,
-            Config.SELLSY_API_USER_TOKEN,
-            Config.SELLSY_API_USER_SECRET,
+            Config.SELLSY_CLIENT_ID,
+            Config.SELLSY_CLIENT_SECRET,
+            Config.SELLSY_ACCESS_TOKEN,
+            Config.SELLSY_REFRESH_TOKEN,
             logger
         )
         
@@ -108,7 +106,7 @@ class ClientSynchronizer:
         Returns:
             True si la connexion réussit, False sinon
         """
-        logger.info("🔄 Test de connexion à l'API Sellsy...")
+        logger.info("🔄 Test de connexion à l'API Sellsy V2...")
         return self.sellsy_api.test_authentication()
     
     def sanitize_client_data(self, record_fields: Dict) -> Optional[Dict]:
@@ -150,10 +148,10 @@ class ClientSynchronizer:
             logger.warning(f"⚠️ Format d'email invalide: {email}")
             return None
         
-        # Format en suivant le format attendu par l'API Sellsy v1 (plus direct sans passer par v2)
+        # Format pour l'API Sellsy V2 - par défaut on considère un individu (particulier)
         client_data = {
             "third": {
-                "name": f"{nom} {prenom}",
+                "name": f"{prenom} {nom}",
                 "email": email,
                 "tel": telephone,
                 "type": "person"  # Personne physique par défaut
@@ -174,7 +172,7 @@ class ClientSynchronizer:
             }
         }
         
-        logger.info(f"✅ Données client validées pour {nom} {prenom}")
+        logger.info(f"✅ Données client validées pour {prenom} {nom}")
         return client_data
 
     def synchronize_client(self, record: Dict):
@@ -206,7 +204,7 @@ class ClientSynchronizer:
             if response:
                 # Vérification de la réponse
                 if response.get("status") == "success":
-                    # Dans l'API Sellsy v1, l'ID client est directement dans response si réussite
+                    # Dans l'API Sellsy v2, l'ID client est dans le champ response
                     client_id = response.get("response")
                     
                     if client_id:
@@ -240,24 +238,20 @@ def check_configuration() -> bool:
         missing_configs.append("AIRTABLE_BASE_ID")
     if not Config.AIRTABLE_TABLE_NAME:
         missing_configs.append("AIRTABLE_TABLE_NAME")
-    if not Config.SELLSY_API_CONSUMER_TOKEN:
-        missing_configs.append("SELLSY_API_CONSUMER_TOKEN")
-    if not Config.SELLSY_API_CONSUMER_SECRET:
-        missing_configs.append("SELLSY_API_CONSUMER_SECRET")
-    if not Config.SELLSY_API_USER_TOKEN:
-        missing_configs.append("SELLSY_API_USER_TOKEN")
-    if not Config.SELLSY_API_USER_SECRET:
-        missing_configs.append("SELLSY_API_USER_SECRET")
+    if not Config.SELLSY_CLIENT_ID:
+        missing_configs.append("SELLSY_CLIENT_ID")
+    if not Config.SELLSY_CLIENT_SECRET:
+        missing_configs.append("SELLSY_CLIENT_SECRET")
         
     if missing_configs:
         logger.error(f"❌ Configuration incomplète. Variables manquantes: {', '.join(missing_configs)}")
         return False
         
     # Afficher les premières lettres des tokens pour le débogage (sans révéler les secrets)
-    if Config.SELLSY_API_CONSUMER_TOKEN:
-        logger.debug(f"SELLSY_API_CONSUMER_TOKEN: {Config.SELLSY_API_CONSUMER_TOKEN[:3]}...")
-    if Config.SELLSY_API_USER_TOKEN:
-        logger.debug(f"SELLSY_API_USER_TOKEN: {Config.SELLSY_API_USER_TOKEN[:3]}...")
+    if Config.SELLSY_CLIENT_ID:
+        logger.debug(f"SELLSY_CLIENT_ID: {Config.SELLSY_CLIENT_ID[:3]}...")
+    if Config.SELLSY_CLIENT_SECRET:
+        logger.debug(f"SELLSY_CLIENT_SECRET: {Config.SELLSY_CLIENT_SECRET[:3]}...")
     
     return True
 
