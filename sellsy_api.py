@@ -1,13 +1,15 @@
 import os
 import json
+import time
+import random
+import hashlib
 import requests
 from typing import Dict, Optional
-from requests_oauthlib import OAuth1
 
 class SellsyAPI:
-    """API client pour Sellsy v2."""
-    # URL de base pour l'API v2
-    API_ENDPOINT = "https://api.sellsy.com/v2"
+    """API client pour Sellsy v1."""
+    # URL de base pour l'API v1
+    API_ENDPOINT = "https://apifeed.sellsy.com/0"
     
     def __init__(self, consumer_token, consumer_secret, user_token, user_secret, logger):
         self.consumer_token = consumer_token
@@ -15,53 +17,111 @@ class SellsyAPI:
         self.user_token = user_token
         self.user_secret = user_secret
         self.logger = logger
+    
+    def _generate_oauth_params(self):
+        """
+        Génère les paramètres OAuth pour l'API Sellsy v1.
         
-        # Création de l'objet OAuth1 pour l'authentification
-        self.oauth = OAuth1(
-            self.consumer_token,
-            self.consumer_secret,
-            self.user_token,
-            self.user_secret
-        )
+        Returns:
+            dict: Les paramètres OAuth
+        """
+        nonce = str(random.getrandbits(64))
+        timestamp = str(int(time.time()))
+        
+        oauth_params = {
+            'oauth_consumer_key': self.consumer_token,
+            'oauth_token': self.user_token,
+            'oauth_nonce': nonce,
+            'oauth_timestamp': timestamp,
+            'oauth_signature_method': 'PLAINTEXT',
+            'oauth_version': '1.0',
+            'oauth_signature': f"{self.consumer_secret}&{self.user_secret}"
+        }
+        
+        return oauth_params
+    
+    def _make_request(self, method: Dict) -> Optional[Dict]:
+        """
+        Effectue une requête à l'API Sellsy v1.
+        
+        Args:
+            method: Méthode API et paramètres associés
+            
+        Returns:
+            Réponse de l'API ou None en cas d'erreur
+        """
+        try:
+            # Génération des paramètres OAuth
+            oauth_params = self._generate_oauth_params()
+            
+            # Construction du corps de la requête
+            request_data = {
+                'request': 1,
+                'io_mode': 'json',
+                'do_in': json.dumps(method)
+            }
+            
+            # Envoi de la requête POST
+            response = requests.post(
+                self.API_ENDPOINT,
+                data=request_data,
+                params=oauth_params
+            )
+            
+            # Vérification de la réponse
+            response.raise_for_status()
+            
+            # Conversion de la réponse en JSON
+            result = response.json()
+            
+            # Vérification des erreurs dans la réponse
+            if "error" in result:
+                self.logger.error(f"❌ Erreur API Sellsy: {result['error']}")
+                return None
+            
+            return result
+            
+        except requests.RequestException as e:
+            self.logger.error(f"❌ Erreur lors de la requête à l'API Sellsy: {str(e)}")
+            if hasattr(e, 'response') and e.response:
+                self.logger.error(f"Status code: {e.response.status_code}")
+                self.logger.error(f"Détails: {e.response.text}")
+            return None
     
     def test_authentication(self) -> bool:
         """
-        Teste l'authentification à l'API Sellsy.
+        Teste l'authentification à l'API Sellsy v1.
         
         Returns:
             bool: True si l'authentification est réussie, False sinon
         """
+        self.logger.info("🔄 Test d'authentification Sellsy...")
+        
         try:
-            # Tester l'authenticité avec l'endpoint 'myself' qui retourne les infos du compte
-            response = requests.get(
-                f"{self.API_ENDPOINT}/myself",
-                auth=self.oauth
-            )
+            # Utilisation de la méthode Infos.getInfos pour tester l'authentification
+            method = {
+                "method": "Infos.getInfos"
+            }
             
-            # Log pour débogage
-            self.logger.debug(f"Test d'authentification - Status code: {response.status_code}")
+            result = self._make_request(method)
             
-            if response.status_code == 200:
+            if result:
                 self.logger.info("✅ Authentification Sellsy réussie")
                 return True
             else:
-                self.logger.error(f"❌ Échec de l'authentification Sellsy: {response.status_code}")
-                self.logger.error(f"Détails: {response.text}")
+                self.logger.error("❌ Échec de l'authentification Sellsy")
                 return False
                 
-        except requests.RequestException as e:
-            self.logger.error(f"❌ Erreur lors du test d'authentification: {e}")
-            if hasattr(e, 'response') and e.response:
-                self.logger.error(f"Status code: {e.response.status_code}")
-                self.logger.error(f"Détails: {e.response.text}")
+        except Exception as e:
+            self.logger.error(f"❌ Erreur lors du test d'authentification: {str(e)}")
             return False
     
     def create_client(self, client_data: Dict) -> Optional[Dict]:
         """
-        Crée un nouveau client dans Sellsy.
+        Crée un nouveau client dans Sellsy v1.
         
         Args:
-            client_data: Données du client à créer
+            client_data: Données du client à créer formatées pour l'API v2
             
         Returns:
             Réponse de l'API ou None en cas d'erreur
@@ -73,31 +133,85 @@ class SellsyAPI:
             return None
         
         try:
-            # Création du client avec l'API v2
-            response = requests.post(
-                f"{self.API_ENDPOINT}/contacts",
-                json=client_data,
-                auth=self.oauth
-            )
+            # Conversion des données du format v2 au format v1
+            v1_client_data = self._convert_v2_to_v1_format(client_data)
             
-            # Log des détails pour débogage
-            self.logger.debug(f"Status code: {response.status_code}")
-            self.logger.debug(f"URL: {self.API_ENDPOINT}/contacts")
-            self.logger.debug(f"Données envoyées: {json.dumps(client_data)}")
+            # Création de la requête pour l'API v1
+            method = {
+                "method": "Client.create",
+                "params": v1_client_data
+            }
             
-            # Vérification de la réponse
-            response.raise_for_status()
+            self.logger.debug(f"Données envoyées à l'API v1: {json.dumps(method)}")
             
-            result = response.json()
-            self.logger.info(f"✅ Client créé avec succès dans Sellsy")
-            return {"status": "success", "response": result}
+            # Envoi de la requête
+            result = self._make_request(method)
             
-        except requests.RequestException as e:
-            self.logger.error(f"❌ Erreur lors de la création du client: {e}")
-            if hasattr(e, 'response') and e.response:
-                self.logger.error(f"Status code: {e.response.status_code}")
-                self.logger.error(f"Détails: {e.response.text}")
+            if result:
+                client_id = result.get("response")
+                self.logger.info(f"✅ Client créé avec succès dans Sellsy (ID: {client_id})")
+                return {"status": "success", "response": {"id": client_id}}
+            else:
+                self.logger.error("❌ Échec de la création du client")
+                return None
+            
+        except Exception as e:
+            self.logger.error(f"❌ Erreur lors de la création du client: {str(e)}")
             return None
+    
+    def _convert_v2_to_v1_format(self, v2_data: Dict) -> Dict:
+        """
+        Convertit les données du format API v2 au format API v1.
+        
+        Args:
+            v2_data: Données client au format API v2
+            
+        Returns:
+            Données client au format API v1
+        """
+        # Récupération des données de base
+        name = v2_data.get("name", "")
+        email = v2_data.get("email", "")
+        phone = v2_data.get("phone", "")
+        
+        # Récupération des données de contact
+        contact = v2_data.get("contact", {})
+        lastname = contact.get("name", "")
+        firstname = contact.get("firstName", "")
+        
+        # Récupération des données d'adresse
+        address = v2_data.get("address", {})
+        street = address.get("address", "")
+        zipcode = address.get("zipcode", "")
+        town = address.get("city", "")
+        country_code = address.get("countryCode", "FR")
+        
+        # Construction des données au format v1
+        v1_data = {
+            "third": {
+                "name": name,
+                "email": email,
+                "tel": phone,
+                "type": "person" if v2_data.get("type") == "person" else "corporation"
+            },
+            "contact": {
+                "name": lastname,
+                "firstname": firstname,
+                "email": email,
+                "tel": phone,
+                "position": "Client",
+                "civil": "man"  # Valeur par défaut
+            },
+            "address": {
+                "name": "Adresse principale",
+                "part1": street,
+                "zip": zipcode,
+                "town": town,
+                "countrycode": country_code
+            }
+        }
+        
+        return v1_data
     
     def get_client(self, client_id: str) -> Optional[Dict]:
         """
@@ -113,19 +227,25 @@ class SellsyAPI:
             return None
             
         try:
-            response = requests.get(
-                f"{self.API_ENDPOINT}/contacts/{client_id}",
-                auth=self.oauth
-            )
+            # Création de la requête pour l'API v1
+            method = {
+                "method": "Client.getOne",
+                "params": {
+                    "clientid": client_id
+                }
+            }
             
-            response.raise_for_status()
-            return {"status": "success", "response": response.json()}
+            # Envoi de la requête
+            result = self._make_request(method)
             
-        except requests.RequestException as e:
-            self.logger.error(f"❌ Erreur lors de la récupération du client {client_id}: {e}")
-            if hasattr(e, 'response') and e.response:
-                self.logger.error(f"Status code: {e.response.status_code}")
-                self.logger.error(f"Détails: {e.response.text}")
+            if result:
+                return {"status": "success", "response": result.get("response")}
+            else:
+                self.logger.error(f"❌ Échec de la récupération du client {client_id}")
+                return None
+            
+        except Exception as e:
+            self.logger.error(f"❌ Erreur lors de la récupération du client {client_id}: {str(e)}")
             return None
     
     def search_clients(self, search_term: str = None, limit: int = 100) -> Optional[Dict]:
@@ -143,22 +263,32 @@ class SellsyAPI:
             return None
             
         try:
-            params = {"limit": limit}
+            # Création de la requête pour l'API v1
+            method = {
+                "method": "Client.getList",
+                "params": {
+                    "pagination": {
+                        "nbperpage": limit,
+                        "pagenum": 1
+                    }
+                }
+            }
+            
+            # Ajout du terme de recherche si présent
             if search_term:
-                params["search"] = search_term
-                
-            response = requests.get(
-                f"{self.API_ENDPOINT}/contacts",
-                params=params,
-                auth=self.oauth
-            )
+                method["params"]["search"] = {
+                    "contains": search_term
+                }
             
-            response.raise_for_status()
-            return {"status": "success", "response": response.json()}
+            # Envoi de la requête
+            result = self._make_request(method)
             
-        except requests.RequestException as e:
-            self.logger.error(f"❌ Erreur lors de la recherche de clients: {e}")
-            if hasattr(e, 'response') and e.response:
-                self.logger.error(f"Status code: {e.response.status_code}")
-                self.logger.error(f"Détails: {e.response.text}")
+            if result:
+                return {"status": "success", "response": result.get("response")}
+            else:
+                self.logger.error("❌ Échec de la recherche de clients")
+                return None
+            
+        except Exception as e:
+            self.logger.error(f"❌ Erreur lors de la recherche de clients: {str(e)}")
             return None
