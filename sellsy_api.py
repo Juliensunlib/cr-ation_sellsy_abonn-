@@ -61,12 +61,26 @@ class SellsyAPI:
                 'do_in': json.dumps(method)
             }
             
+            # Affichage des détails pour le débogage (ne pas inclure les secrets complets)
+            safe_oauth = oauth_params.copy()
+            if 'oauth_signature' in safe_oauth:
+                signature_parts = safe_oauth['oauth_signature'].split('&')
+                if len(signature_parts) == 2:
+                    safe_oauth['oauth_signature'] = f"{signature_parts[0][:3]}...&{signature_parts[1][:3]}..."
+            self.logger.debug(f"OAuth params: {safe_oauth}")
+            self.logger.debug(f"Request data: {request_data}")
+            
             # Envoi de la requête POST
             response = requests.post(
                 self.API_ENDPOINT,
-                data=request_data,
-                params=oauth_params
+                params=oauth_params,  # Paramètres OAuth dans l'URL
+                data=request_data     # Données dans le corps de la requête
             )
+            
+            # Enregistrement de la réponse brute pour débogage
+            self.logger.debug(f"Status code: {response.status_code}")
+            self.logger.debug(f"Response headers: {response.headers}")
+            self.logger.debug(f"Response content: {response.text[:200]}...")  # Limiter pour ne pas surcharger les logs
             
             # Vérification de la réponse
             response.raise_for_status()
@@ -75,7 +89,7 @@ class SellsyAPI:
             result = response.json()
             
             # Vérification des erreurs dans la réponse
-            if "error" in result:
+            if isinstance(result, dict) and "error" in result:
                 self.logger.error(f"❌ Erreur API Sellsy: {result['error']}")
                 return None
             
@@ -86,6 +100,13 @@ class SellsyAPI:
             if hasattr(e, 'response') and e.response:
                 self.logger.error(f"Status code: {e.response.status_code}")
                 self.logger.error(f"Détails: {e.response.text}")
+            return None
+        except ValueError as e:
+            # Erreur lors du décodage JSON
+            self.logger.error(f"❌ Erreur de décodage JSON: {str(e)}")
+            return None
+        except Exception as e:
+            self.logger.error(f"❌ Erreur inattendue: {str(e)}")
             return None
     
     def test_authentication(self) -> bool:
@@ -142,7 +163,14 @@ class SellsyAPI:
                 "params": v1_client_data
             }
             
-            self.logger.debug(f"Données envoyées à l'API v1: {json.dumps(method)}")
+            # Masquer les données sensibles pour le log
+            log_data = method.copy()
+            if "params" in log_data and "third" in log_data["params"] and "email" in log_data["params"]["third"]:
+                log_data["params"]["third"]["email"] = "***@***.com"
+            if "params" in log_data and "contact" in log_data["params"] and "email" in log_data["params"]["contact"]:
+                log_data["params"]["contact"]["email"] = "***@***.com"
+                
+            self.logger.debug(f"Données envoyées à l'API v1: {json.dumps(log_data)}")
             
             # Envoi de la requête
             result = self._make_request(method)
