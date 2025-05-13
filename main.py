@@ -9,6 +9,10 @@ from logging.handlers import RotatingFileHandler
 from typing import Dict, List, Optional
 from datetime import datetime
 from requests_oauthlib import OAuth1
+from dotenv import load_dotenv
+
+# Charger les variables d'environnement depuis un fichier .env si présent
+load_dotenv()
 
 def setup_logging():
     """Configure et initialise le système de journalisation."""
@@ -159,7 +163,9 @@ class AirtableAPI:
 
 class SellsyAPI:
     """API client pour Sellsy."""
-    API_URL = "https://apifeed.sellsy.com/0/api"
+    # CORRECTION: URL d'API corrigée pour correspondre à la documentation Sellsy
+    API_URL = "https://api.sellsy.com/v2/oauth/authentication" # Pour vérifier l'authentification
+    API_ENDPOINT = "https://api.sellsy.com/v2" # Base pour les requêtes API v2
     
     @staticmethod
     def make_request(method: str, params: Dict) -> Optional[Dict]:
@@ -175,6 +181,12 @@ class SellsyAPI:
         """
         logger.info(f"📤 Envoi de la requête Sellsy : {method}")
         
+        # Vérification des informations d'authentification
+        if not all([Config.SELLSY_API_CONSUMER_TOKEN, Config.SELLSY_API_CONSUMER_SECRET,
+                    Config.SELLSY_API_USER_TOKEN, Config.SELLSY_API_USER_SECRET]):
+            logger.error("❌ Informations d'authentification Sellsy incomplètes")
+            return None
+        
         # Préparation de l'authentification OAuth1
         oauth = OAuth1(
             Config.SELLSY_API_CONSUMER_TOKEN,
@@ -184,19 +196,31 @@ class SellsyAPI:
         )
         
         try:
-            # Préparation de la requête selon la documentation Sellsy V1
-            response = requests.post(
-                SellsyAPI.API_URL, 
-                data={"request": 1, "io_mode": "json"},
-                files={"do_in": (None, json.dumps({
-                    "method": method,
-                    "params": params
-                }))},
-                auth=oauth
-            )
+            # Tester l'authentification d'abord
+            auth_check = requests.get(SellsyAPI.API_URL, auth=oauth)
+            
+            if auth_check.status_code != 200:
+                logger.error(f"❌ Échec de l'authentification Sellsy: {auth_check.status_code}")
+                logger.error(f"Détails: {auth_check.text}")
+                return None
+            
+            logger.info("✅ Authentification Sellsy réussie")
+            
+            # CORRECTION: Utilisation de l'API Sellsy v2 (REST) au lieu de v1
+            if method == "Client.create":
+                endpoint = f"{SellsyAPI.API_ENDPOINT}/contacts"
+                response = requests.post(endpoint, json=params, auth=oauth)
+            elif method.startswith("Client."):
+                # Adapter selon les méthodes nécessaires
+                client_id = params.get("clientid", "")
+                endpoint = f"{SellsyAPI.API_ENDPOINT}/contacts/{client_id}"
+                response = requests.get(endpoint, auth=oauth)
+            else:
+                logger.error(f"❌ Méthode non supportée: {method}")
+                return None
             
             # Log de la requête pour débogage
-            logger.debug(f"URL: {SellsyAPI.API_URL}")
+            logger.debug(f"URL: {endpoint if 'endpoint' in locals() else 'non définie'}")
             logger.debug(f"Méthode: {method}")
             logger.debug(f"Paramètres: {json.dumps(params)}")
             
@@ -211,15 +235,9 @@ class SellsyAPI:
             try:
                 # Tentative de décodage JSON
                 result = response.json()
+                logger.info(f"✅ Réponse Sellsy réussie pour {method}")
+                return {"status": "success", "response": result}
                 
-                # Vérification du statut de l'API
-                if isinstance(result, dict):
-                    if result.get("status") == "error":
-                        logger.error(f"❌ Erreur API Sellsy: {result.get('error')}")
-                    elif result.get("status") == "success":
-                        logger.info(f"✅ Réponse Sellsy réussie pour {method}")
-                
-                return result
             except json.JSONDecodeError as e:
                 logger.error(f"❌ Erreur de décodage JSON: {e}")
                 logger.error(f"Contenu de la réponse: {response.text}")
@@ -275,26 +293,24 @@ class ClientSynchronizer:
             logger.warning(f"⚠️ Format d'email invalide: {email}")
             return None
         
-        # Préparation des données selon la structure de l'API Sellsy
+        # CORRECTION: Adaptation du format pour l'API Sellsy v2
         client_data = {
-            "third": {
-                "name": f"{nom} {prenom}",
-                "type": "person",  # Type person car il s'agit d'un particulier
-                "email": email,
-                "tel": telephone,
-            },
+            "type": "person",
+            "name": f"{nom} {prenom}",
+            "email": email,
+            "phone": telephone,
             "contact": {
                 "name": nom,
-                "forename": prenom,
+                "firstName": prenom,
                 "email": email,
-                "tel": telephone,
+                "mobile": telephone
             },
             "address": {
                 "name": "Adresse principale",
-                "part1": adresse,
-                "zip": code_postal,
-                "town": ville,
-                "countrycode": "FR"  # Par défaut France
+                "address": adresse,
+                "zipcode": code_postal,
+                "city": ville,
+                "countryCode": "FR"  # Par défaut France
             }
         }
         
@@ -330,7 +346,7 @@ class ClientSynchronizer:
                     client_id = None
                     
                     if "response" in response and isinstance(response["response"], dict):
-                        client_id = response["response"].get("client_id")
+                        client_id = response["response"].get("id")
                     
                     if client_id:
                         logger.info(f"✅ Client créé avec succès dans Sellsy. ID: {client_id}")
@@ -375,6 +391,13 @@ def check_configuration():
     if missing_configs:
         logger.error(f"❌ Configuration incomplète. Variables manquantes: {', '.join(missing_configs)}")
         return False
+        
+    # Afficher les premières lettres des tokens pour le débogage (sans révéler les secrets)
+    if Config.SELLSY_API_CONSUMER_TOKEN:
+        logger.debug(f"SELLSY_API_CONSUMER_TOKEN: {Config.SELLSY_API_CONSUMER_TOKEN[:3]}...")
+    if Config.SELLSY_API_USER_TOKEN:
+        logger.debug(f"SELLSY_API_USER_TOKEN: {Config.SELLSY_API_USER_TOKEN[:3]}...")
+    
     return True
 
 def main():
