@@ -83,40 +83,70 @@ class SellsyAPI:
             # En-têtes pour l'authentification Basic
             auth = (self.client_id, self.client_secret)
             
-            # Paramètres de la requête
+            # Paramètres de la requête - Correction du format pour applications OAuth2
             payload = {
                 "grant_type": "client_credentials"
             }
             
             # En-têtes pour spécifier le type de contenu
             headers = {
-                "Content-Type": "application/x-www-form-urlencoded"
+                "Content-Type": "application/x-www-form-urlencoded",
+                "Accept": "application/json"
             }
             
+            # Debug pour voir ce qui est envoyé
+            self.logger.debug(f"Envoi de requête d'authentification à {self.AUTH_URL}")
+            self.logger.debug(f"Payload: {payload}")
+            
+            # Requête avec gestion explicite des timeouts et vérification SSL
             response = requests.post(
                 self.AUTH_URL, 
                 auth=auth,
-                data=payload,
-                headers=headers
+                data=payload,  # Utiliser data au lieu de json pour application/x-www-form-urlencoded
+                headers=headers,
+                timeout=30,
+                verify=True
             )
             
+            # Log de la réponse brute pour diagnostiquer les problèmes
+            self.logger.debug(f"Code de statut de réponse: {response.status_code}")
+            self.logger.debug(f"Réponse brute: {response.text[:200]}")
+            
             if response.status_code == 200:
-                data = response.json()
-                self.access_token = data["access_token"]
-                # Le refresh token est généralement fourni avec le grant_type=authorization_code
-                if "refresh_token" in data:
-                    self.refresh_token = data["refresh_token"]
-                # Calcul de la date d'expiration (généralement 3600 secondes)
-                expires_in = data.get("expires_in", 3600)
-                self.token_expires_at = datetime.now() + timedelta(seconds=expires_in - 60)  # -60 pour marge de sécurité
-                
-                self.logger.info(f"✅ Token d'accès obtenu avec succès (expire dans {expires_in} secondes)")
-                return True
+                try:
+                    data = response.json()
+                    self.access_token = data["access_token"]
+                    # Le refresh token est généralement fourni avec le grant_type=authorization_code
+                    if "refresh_token" in data:
+                        self.refresh_token = data["refresh_token"]
+                    # Calcul de la date d'expiration (généralement 3600 secondes)
+                    expires_in = data.get("expires_in", 3600)
+                    self.token_expires_at = datetime.now() + timedelta(seconds=expires_in - 60)  # -60 pour marge de sécurité
+                    
+                    self.logger.info(f"✅ Token d'accès obtenu avec succès (expire dans {expires_in} secondes)")
+                    return True
+                except json.JSONDecodeError as json_err:
+                    self.logger.error(f"❌ Impossible de décoder la réponse JSON: {json_err}")
+                    self.logger.error(f"Contenu de la réponse: {response.text}")
+                    return False
             else:
                 self.logger.error(f"❌ Échec d'obtention du token: {response.status_code}")
                 self.logger.error(f"Détails: {response.text}")
+                
+                # Vérification spécifique pour les erreurs courantes
+                if response.status_code == 401:
+                    self.logger.error("❌ Authentification refusée. Vérifiez vos identifiants client_id et client_secret.")
+                elif response.status_code == 400:
+                    self.logger.error("❌ Requête incorrecte. Vérifiez le format des paramètres.")
+                
                 return False
                 
+        except requests.exceptions.Timeout:
+            self.logger.error("❌ Timeout lors de la connexion à l'API Sellsy")
+            return False
+        except requests.exceptions.ConnectionError:
+            self.logger.error("❌ Impossible de se connecter à l'API Sellsy - Vérifiez votre connexion internet")
+            return False
         except Exception as e:
             self.logger.error(f"❌ Erreur lors de l'obtention du token: {str(e)}")
             return False
@@ -140,26 +170,32 @@ class SellsyAPI:
                 }
                 
                 headers = {
-                    "Content-Type": "application/x-www-form-urlencoded"
+                    "Content-Type": "application/x-www-form-urlencoded",
+                    "Accept": "application/json"
                 }
                 
                 response = requests.post(
                     self.AUTH_URL, 
                     auth=auth,
-                    data=payload,
-                    headers=headers
+                    data=payload,  # Utiliser data au lieu de json pour application/x-www-form-urlencoded
+                    headers=headers,
+                    timeout=30
                 )
                 
                 if response.status_code == 200:
-                    data = response.json()
-                    self.access_token = data["access_token"]
-                    if "refresh_token" in data:
-                        self.refresh_token = data["refresh_token"]
-                    expires_in = data.get("expires_in", 3600)
-                    self.token_expires_at = datetime.now() + timedelta(seconds=expires_in - 60)
-                    
-                    self.logger.info(f"✅ Token d'accès rafraîchi avec succès")
-                    return True
+                    try:
+                        data = response.json()
+                        self.access_token = data["access_token"]
+                        if "refresh_token" in data:
+                            self.refresh_token = data["refresh_token"]
+                        expires_in = data.get("expires_in", 3600)
+                        self.token_expires_at = datetime.now() + timedelta(seconds=expires_in - 60)
+                        
+                        self.logger.info(f"✅ Token d'accès rafraîchi avec succès")
+                        return True
+                    except json.JSONDecodeError:
+                        self.logger.error(f"❌ Impossible de décoder la réponse JSON: {response.text}")
+                        return False
                 else:
                     self.logger.error(f"❌ Échec du rafraîchissement du token: {response.status_code}")
                     self.logger.error(f"Détails: {response.text}")
@@ -185,68 +221,96 @@ class SellsyAPI:
         Returns:
             Réponse de l'API ou None en cas d'erreur
         """
-        try:
-            # S'assurer que nous avons un token valide
-            if self._is_token_expired():
-                if not self.get_access_token():
-                    self.logger.error("❌ Impossible d'obtenir un token d'accès valide")
-                    return None
-            
-            # Préparation de l'URL
-            url = f"{self.API_BASE_URL}/{endpoint.lstrip('/')}"
-            
-            # Préparation des en-têtes
-            headers = {
-                "Authorization": f"Bearer {self.access_token}",
-                "Content-Type": "application/json",
-                "Accept": "application/json"
-            }
-            
-            self.logger.debug(f"Requête API v2: {method} {url}")
-            if data:
-                self.logger.debug(f"Données: {json.dumps(data)[:200]}...")
-            if params:
-                self.logger.debug(f"Paramètres: {params}")
-            
-            # Exécution de la requête
-            response = requests.request(
-                method=method,
-                url=url,
-                headers=headers,
-                json=data if data else None,
-                params=params if params else None
-            )
-            
-            # Vérification du statut de la réponse
-            if response.status_code in [200, 201, 202, 204]:
-                try:
-                    if response.content:
-                        result = response.json()
-                        self.logger.debug(f"Réponse reçue: {json.dumps(result)[:200]}...")
-                        return result
-                    return {"status": "success"}
-                except json.JSONDecodeError:
-                    self.logger.error(f"❌ Réponse non-JSON: {response.text[:200]}")
-                    return None
-            elif response.status_code == 401:
-                # Token expiré ou invalide, on tente de rafraîchir
-                self.logger.warning("⚠️ Token d'accès expiré. Tentative de rafraîchissement...")
-                if self.refresh_access_token():
-                    # On réessaie la requête avec le nouveau token
-                    return self.request_api(method, endpoint, data, params)
-                return None
-            else:
-                self.logger.error(f"❌ Erreur HTTP: {response.status_code}")
-                self.logger.error(f"Détails: {response.text}")
-                return None
+        max_retries = 3
+        retry_count = 0
+        
+        while retry_count < max_retries:
+            try:
+                # S'assurer que nous avons un token valide
+                if self._is_token_expired():
+                    if not self.get_access_token():
+                        self.logger.error("❌ Impossible d'obtenir un token d'accès valide")
+                        return None
                 
-        except requests.RequestException as e:
-            self.logger.error(f"❌ Erreur de connexion: {str(e)}")
-            return None
-        except Exception as e:
-            self.logger.error(f"❌ Erreur inattendue: {str(e)}")
-            self.logger.exception("Détails:")
-            return None
+                # Préparation de l'URL
+                url = f"{self.API_BASE_URL}/{endpoint.lstrip('/')}"
+                
+                # Préparation des en-têtes
+                headers = {
+                    "Authorization": f"Bearer {self.access_token}",
+                    "Content-Type": "application/json",
+                    "Accept": "application/json"
+                }
+                
+                self.logger.debug(f"Requête API v2: {method} {url}")
+                if data:
+                    self.logger.debug(f"Données: {json.dumps(data)[:200]}...")
+                if params:
+                    self.logger.debug(f"Paramètres: {params}")
+                
+                # Exécution de la requête avec timeout
+                response = requests.request(
+                    method=method,
+                    url=url,
+                    headers=headers,
+                    json=data if data else None,
+                    params=params if params else None,
+                    timeout=30
+                )
+                
+                # Vérification du statut de la réponse
+                if response.status_code in [200, 201, 202, 204]:
+                    try:
+                        if response.content:
+                            result = response.json()
+                            self.logger.debug(f"Réponse reçue: {json.dumps(result)[:200]}...")
+                            return result
+                        return {"status": "success"}
+                    except json.JSONDecodeError:
+                        self.logger.error(f"❌ Réponse non-JSON: {response.text[:200]}")
+                        return None
+                elif response.status_code == 401:
+                    # Token expiré ou invalide, on tente de rafraîchir
+                    self.logger.warning("⚠️ Token d'accès expiré. Tentative de rafraîchissement...")
+                    if self.refresh_access_token():
+                        # On réessaie la requête avec le nouveau token lors de la prochaine itération
+                        retry_count += 1
+                        continue
+                    return None
+                else:
+                    self.logger.error(f"❌ Erreur HTTP: {response.status_code}")
+                    self.logger.error(f"Détails: {response.text}")
+                    
+                    # Si c'est une erreur temporaire (429, 500, 502, 503, 504), on réessaie
+                    if response.status_code in [429, 500, 502, 503, 504]:
+                        retry_count += 1
+                        wait_time = 2 ** retry_count  # Backoff exponentiel
+                        self.logger.info(f"⏱️ Attente de {wait_time} secondes avant nouvelle tentative ({retry_count}/{max_retries})")
+                        time.sleep(wait_time)
+                        continue
+                    
+                    return None
+                
+            except requests.exceptions.Timeout:
+                self.logger.warning(f"⚠️ Timeout lors de la requête (tentative {retry_count+1}/{max_retries})")
+                retry_count += 1
+                if retry_count < max_retries:
+                    time.sleep(2 ** retry_count)  # Backoff exponentiel
+                    continue
+                self.logger.error("❌ Échec après plusieurs tentatives (timeout)")
+                return None
+            except requests.RequestException as e:
+                self.logger.error(f"❌ Erreur de connexion: {str(e)}")
+                return None
+            except Exception as e:
+                self.logger.error(f"❌ Erreur inattendue: {str(e)}")
+                self.logger.exception("Détails:")
+                return None
+            
+            # Si on arrive ici, c'est qu'on a une réponse correcte ou une erreur définitive
+            break
+        
+        return None  # En cas d'échec après toutes les tentatives
     
     def test_authentication(self) -> bool:
         """
@@ -258,11 +322,17 @@ class SellsyAPI:
         self.logger.info("🔄 Test d'authentification Sellsy v2...")
         
         try:
+            # Obtenons d'abord un token valide
+            if not self.get_access_token():
+                self.logger.error("❌ Impossible d'obtenir un token valide")
+                return False
+            
             # Récupération du compte utilisateur pour tester l'authentification
             response = self.request_api("GET", "/myself")
             
             if response:
                 self.logger.info("✅ Authentification réussie!")
+                self.logger.debug(f"Informations du compte: {json.dumps(response)[:200]}...")
                 return True
             else:
                 self.logger.error("❌ Échec d'authentification")
