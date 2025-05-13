@@ -139,8 +139,10 @@ class SellsyAPI:
         nonce = str(random.getrandbits(64))
         timestamp = str(int(time.time()))
         
-        # Création de la signature
-        # Correction: Pour Sellsy, la signature est simplement concaténée avec &, pas d'encodage URL ici
+        # Correction pour l'authentification Sellsy:
+        # La signature doit être au format "&" (deux valeurs séparées par &)
+        # Pour une application privée, c'est consumer_secret&user_secret
+        # Sans encodage URL
         signature = f"{self.consumer_secret}&{self.user_secret}"
         
         # Paramètres OAuth
