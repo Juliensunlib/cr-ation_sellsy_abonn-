@@ -257,18 +257,31 @@ def main():
             logger.error("❌ Configuration incomplète. Vérifiez vos variables d'environnement.")
             return
         
-        # Récupération des enregistrements Airtable sans ID_Sellsy
-        records = AirtableAPI.get_records("BLANK({ID_Sellsy})")
+        # Récupération de tous les enregistrements pour diagnostic
+        all_records = AirtableAPI.get_records()
+        logger.info(f"📊 Total des enregistrements dans Airtable: {len(all_records)}")
+        
+        # Filtrage manuel des enregistrements sans ID_Sellsy
+        records = []
+        for record in all_records:
+            fields = record.get('fields', {})
+            if 'ID_Sellsy' not in fields or not fields['ID_Sellsy']:
+                records.append(record)
+                logger.info(f"🔍 Trouvé un enregistrement sans ID_Sellsy: {record['id']} - {fields.get('Nom', 'Sans nom')} {fields.get('Prenom', 'Sans prénom')}")
         
         if not records:
             logger.info("⏹️ Aucun client sans ID_Sellsy à synchroniser.")
             
-            # Si aucun client sans ID_Sellsy, vérifier s'il y a des clients en général
-            all_records = AirtableAPI.get_records()
+            # Afficher les champs disponibles dans le premier enregistrement pour diagnostic
             if all_records:
-                logger.info(f"ℹ️ Il existe {len(all_records)} enregistrements au total, mais tous ont déjà un ID_Sellsy.")
-            else:
-                logger.info("ℹ️ La table Airtable est vide.")
+                sample_record = all_records[0]
+                logger.info(f"📋 Exemple de champs disponibles dans un enregistrement: {list(sample_record.get('fields', {}).keys())}")
+                
+                # Vérifier si le champ existe avec une orthographe différente
+                possible_id_fields = [field for field in sample_record.get('fields', {}).keys() 
+                                    if 'id' in field.lower() and 'sellsy' in field.lower()]
+                if possible_id_fields:
+                    logger.info(f"💡 Champs potentiellement liés à Sellsy trouvés: {possible_id_fields}")
             
             return
         
