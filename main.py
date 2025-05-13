@@ -240,10 +240,28 @@ def main():
         
         # Récupération des enregistrements à synchroniser
         filter_formula = "BLANK({ID_Sellsy})"
-        records_to_sync = synchronizer.airtable_api.get_records(filter_formula)
+        logger.info(f"🔍 Recherche des clients sans ID_Sellsy avec la formule: {filter_formula}")
         
-        if not records_to_sync:
-            logger.info("⏹️ Aucun client sans ID_Sellsy à synchroniser.")
+        try:
+            # D'abord, récupérons tous les enregistrements pour voir combien il y en a
+            all_records = synchronizer.airtable_api.get_records()
+            logger.info(f"📊 Nombre total d'enregistrements dans Airtable: {len(all_records)}")
+            
+            # Puis, récupérons les enregistrements à synchroniser
+            records_to_sync = synchronizer.airtable_api.get_records(filter_formula)
+            
+            logger.info(f"📝 Nombre d'enregistrements à synchroniser: {len(records_to_sync) if records_to_sync else 0}")
+            
+            # Affichons les premiers enregistrements pour débogage
+            if records_to_sync and len(records_to_sync) > 0:
+                logger.debug(f"Premier enregistrement à synchroniser: {json.dumps(records_to_sync[0].get('fields', {}))}")
+            
+            if not records_to_sync:
+                logger.info("⏹️ Aucun client sans ID_Sellsy à synchroniser.")
+                return
+        except Exception as e:
+            logger.error(f"❌ Erreur lors de la récupération des enregistrements: {str(e)}")
+            logger.exception("Détails de l'erreur:")
             return
         
         logger.info(f"🔄 Synchronisation de {len(records_to_sync)} clients")
