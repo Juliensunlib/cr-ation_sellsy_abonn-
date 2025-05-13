@@ -309,7 +309,7 @@ class SellsyAPI:
     
     def test_authentication(self) -> bool:
         """
-        Teste l'authentification en récupérant les informations sur l'API.
+        Teste l'authentification en utilisant un endpoint valide de l'API Sellsy V2.
         
         Returns:
             True si l'authentification est réussie, False sinon
@@ -322,12 +322,12 @@ class SellsyAPI:
                 self.logger.error("❌ Impossible d'obtenir un token valide")
                 return False
             
-            # Récupération du compte utilisateur pour tester l'authentification
-            response = self.request_api("GET", "/myself")
+            # L'endpoint /myself n'existe pas dans l'API v2
+            # À la place, on utilise un endpoint qui existe sûrement dans l'API v2 comme /individuals ou /companies avec une limite à 1
+            response = self.request_api("GET", "/individuals", params={"limit": 1})
             
-            if response:
+            if response is not None:
                 self.logger.info("✅ Authentification réussie!")
-                self.logger.debug(f"Informations du compte: {json.dumps(response)[:200]}...")
                 return True
             else:
                 self.logger.error("❌ Échec d'authentification")
