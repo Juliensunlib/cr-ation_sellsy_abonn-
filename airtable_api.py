@@ -1,5 +1,6 @@
 import os
 import requests
+import logging
 from typing import Dict, List, Optional
 
 class AirtableAPI:
@@ -12,6 +13,7 @@ class AirtableAPI:
             "Authorization": f"Bearer {api_key}",
             "Content-Type": "application/json"
         }
+        self.logger = logging.getLogger('SellsySynchronizer')
     
     def get_records(self, filter_formula=None) -> List[Dict]:
         """
@@ -26,32 +28,54 @@ class AirtableAPI:
         records = []
         offset = None
         
-        while True:
-            params = {}
-            if offset:
-                params["offset"] = offset
-            
-            # Ajout du filtre si spécifié
-            if filter_formula:
-                params["filterByFormula"] = filter_formula
-            
-            response = requests.get(
-                self.base_url, 
-                headers=self.headers, 
-                params=params
-            )
-            
-            response.raise_for_status()
-            data = response.json()
-            
-            page_records = data.get("records", [])
-            records.extend(page_records)
-            
-            offset = data.get("offset")
-            if not offset:
-                break
+        self.logger.info(f"🔄 Récupération des enregistrements Airtable" + 
+                        (f" avec filtre: {filter_formula}" if filter_formula else ""))
+        
+        try:
+            while True:
+                params = {}
+                if offset:
+                    params["offset"] = offset
                 
-        return records
+                # Ajout du filtre si spécifié
+                if filter_formula:
+                    params["filterByFormula"] = filter_formula
+                
+                self.logger.debug(f"URL de requête: {self.base_url}")
+                self.logger.debug(f"Paramètres: {params}")
+                
+                response = requests.get(
+                    self.base_url, 
+                    headers=self.headers, 
+                    params=params
+                )
+                
+                if response.status_code != 200:
+                    self.logger.error(f"❌ Erreur API Airtable {response.status_code}: {response.text}")
+                    return []
+                
+                data = response.json()
+                
+                page_records = data.get("records", [])
+                self.logger.debug(f"Récupération de {len(page_records)} enregistrements dans cette page")
+                records.extend(page_records)
+                
+                offset = data.get("offset")
+                if not offset:
+                    break
+                
+            self.logger.info(f"✅ {len(records)} enregistrements récupérés au total")
+            return records
+            
+        except requests.RequestException as e:
+            self.logger.error(f"❌ Erreur lors de la requête Airtable: {str(e)}")
+            if hasattr(e, 'response') and e.response:
+                self.logger.error(f"Status code: {e.response.status_code}")
+                self.logger.error(f"Détails: {e.response.text}")
+            return []
+        except Exception as e:
+            self.logger.error(f"❌ Erreur inattendue lors de la récupération des enregistrements: {str(e)}")
+            return []
     
     def update_record(self, record_id: str, fields: Dict) -> Dict:
         """
@@ -64,14 +88,25 @@ class AirtableAPI:
         Returns:
             Réponse de l'API Airtable
         """
-        response = requests.patch(
-            f"{self.base_url}/{record_id}", 
-            headers=self.headers, 
-            json={"fields": fields}
-        )
-        
-        response.raise_for_status()
-        return response.json()
+        try:
+            self.logger.debug(f"Mise à jour de l'enregistrement {record_id} avec les champs: {fields}")
+            
+            response = requests.patch(
+                f"{self.base_url}/{record_id}", 
+                headers=self.headers, 
+                json={"fields": fields}
+            )
+            
+            if response.status_code != 200:
+                self.logger.error(f"❌ Erreur lors de la mise à jour {response.status_code}: {response.text}")
+                return None
+            
+            self.logger.info(f"✅ Enregistrement {record_id} mis à jour avec succès")
+            return response.json()
+            
+        except Exception as e:
+            self.logger.error(f"❌ Erreur lors de la mise à jour de l'enregistrement: {str(e)}")
+            return None
     
     def create_record(self, fields: Dict) -> Dict:
         """
@@ -83,11 +118,22 @@ class AirtableAPI:
         Returns:
             Réponse de l'API Airtable
         """
-        response = requests.post(
-            self.base_url, 
-            headers=self.headers, 
-            json={"fields": fields}
-        )
-        
-        response.raise_for_status()
-        return response.json()
+        try:
+            self.logger.debug(f"Création d'un nouvel enregistrement avec les champs: {fields}")
+            
+            response = requests.post(
+                self.base_url, 
+                headers=self.headers, 
+                json={"fields": fields}
+            )
+            
+            if response.status_code != 200:
+                self.logger.error(f"❌ Erreur lors de la création {response.status_code}: {response.text}")
+                return None
+                
+            self.logger.info(f"✅ Nouvel enregistrement créé avec succès")
+            return response.json()
+            
+        except Exception as e:
+            self.logger.error(f"❌ Erreur lors de la création de l'enregistrement: {str(e)}")
+            return None
