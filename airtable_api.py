@@ -15,12 +15,13 @@ class AirtableAPI:
         }
         self.logger = logging.getLogger('SellsySynchronizer')
     
-    def get_records(self, filter_formula=None) -> List[Dict]:
+    def get_records(self, filter_formula=None, limit=None) -> List[Dict]:
         """
         Récupère les enregistrements d'Airtable selon le filtre spécifié.
         
         Args:
             filter_formula: Formule de filtrage Airtable (ex: "BLANK({ID_Sellsy})")
+            limit: Nombre maximum d'enregistrements à récupérer (optionnel)
             
         Returns:
             Liste des enregistrements
@@ -29,7 +30,8 @@ class AirtableAPI:
         offset = None
         
         self.logger.info(f"🔄 Récupération des enregistrements Airtable" + 
-                        (f" avec filtre: {filter_formula}" if filter_formula else ""))
+                        (f" avec filtre: {filter_formula}" if filter_formula else "") +
+                        (f" (limité à {limit})" if limit else ""))
         
         try:
             while True:
@@ -40,6 +42,10 @@ class AirtableAPI:
                 # Ajout du filtre si spécifié
                 if filter_formula:
                     params["filterByFormula"] = filter_formula
+                
+                # Ajout de la limite si spécifiée
+                if limit:
+                    params["maxRecords"] = limit
                 
                 self.logger.debug(f"URL de requête: {self.base_url}")
                 self.logger.debug(f"Paramètres: {params}")
@@ -59,6 +65,11 @@ class AirtableAPI:
                 page_records = data.get("records", [])
                 self.logger.debug(f"Récupération de {len(page_records)} enregistrements dans cette page")
                 records.extend(page_records)
+                
+                # Si une limite est définie et atteinte, arrêtons-nous
+                if limit and len(records) >= limit:
+                    records = records[:limit]  # Assurons-nous de ne pas dépasser la limite
+                    break
                 
                 offset = data.get("offset")
                 if not offset:
