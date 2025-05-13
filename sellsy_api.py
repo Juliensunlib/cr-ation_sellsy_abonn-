@@ -4,215 +4,209 @@ import time
 import random
 import hashlib
 import requests
-from typing import Dict, Optional
 import urllib.parse
+import logging
+from typing import Dict, List, Optional
 
 class SellsyAPI:
-    """API client pour Sellsy v1."""
-    # URL de base pour l'API v1
-    API_ENDPOINT = "https://apifeed.sellsy.com/0"
+    """
+    Client API pour Sellsy v1 basé sur l'authentification OAuth conforme à la documentation Sellsy.
+    """
     
-    def __init__(self, consumer_token, consumer_secret, user_token, user_secret, logger):
+    # URL de l'API selon la documentation
+    API_URL = "https://apifeed.sellsy.com/0"
+    REQ_TOKEN_URL = "https://apifeed.sellsy.com/0/request_token"
+    ACC_TOKEN_URL = "https://apifeed.sellsy.com/0/access_token"
+    
+    def __init__(self, consumer_token, consumer_secret, user_token, user_secret, logger=None):
+        """
+        Initialise le client API Sellsy.
+        
+        Args:
+            consumer_token: Token de l'application
+            consumer_secret: Secret de l'application
+            user_token: Token utilisateur (pour application privée)
+            user_secret: Secret utilisateur (pour application privée)
+            logger: Logger pour journaliser les actions
+        """
         self.consumer_token = consumer_token
         self.consumer_secret = consumer_secret
         self.user_token = user_token
         self.user_secret = user_secret
-        self.logger = logger
+        
+        # Définir un logger par défaut si aucun n'est fourni
+        if logger is None:
+            self.logger = logging.getLogger('SellsyAPI')
+            handler = logging.StreamHandler()
+            formatter = logging.Formatter('%(asctime)s - %(name)s - %(levelname)s - %(message)s')
+            handler.setFormatter(formatter)
+            self.logger.addHandler(handler)
+            self.logger.setLevel(logging.INFO)
+        else:
+            self.logger = logger
+        
+        self.logger.debug("SellsyAPI initialisée avec succès")
     
-    def _generate_oauth_params(self):
+    def request_api(self, request_settings: Dict) -> Optional[Dict]:
         """
-        Génère les paramètres OAuth pour l'API Sellsy v1.
-        
-        Returns:
-            dict: Les paramètres OAuth
-        """
-        nonce = str(random.getrandbits(64))
-        timestamp = str(int(time.time()))
-        
-        # Construction correcte de la signature pour Sellsy API v1
-        # La signature de base doit être les secrets séparés par & SANS URL ENCODE
-        signature = f"{self.consumer_secret}&{self.user_secret}"
-        
-        oauth_params = {
-            'oauth_consumer_key': self.consumer_token,
-            'oauth_token': self.user_token,
-            'oauth_nonce': nonce,
-            'oauth_timestamp': timestamp,
-            'oauth_signature_method': 'PLAINTEXT',
-            'oauth_version': '1.0',
-            'oauth_signature': signature
-        }
-        
-        return oauth_params
-    
-    def _make_request(self, method: Dict) -> Optional[Dict]:
-        """
-        Effectue une requête à l'API Sellsy v1.
+        Effectue une requête à l'API Sellsy en suivant la documentation officielle.
         
         Args:
-            method: Méthode API et paramètres associés
+            request_settings: Paramètres de la requête (méthode et paramètres)
             
         Returns:
             Réponse de l'API ou None en cas d'erreur
         """
         try:
-            # Génération des paramètres OAuth
-            oauth_params = self._generate_oauth_params()
+            # Vérification que les tokens sont présents
+            if not all([self.consumer_token, self.consumer_secret, self.user_token, self.user_secret]):
+                self.logger.error("❌ Authentification incomplète: tokens/secrets manquants")
+                return None
             
-            # Construction du corps de la requête
+            # Préparation des paramètres OAuth
+            oauth_params = self._prepare_oauth_params()
+            
+            # Préparation du corps de la requête
             request_data = {
                 'request': 1,
                 'io_mode': 'json',
-                'do_in': json.dumps(method)
+                'do_in': json.dumps(request_settings)
             }
             
-            # Cloner les oauth_params pour le log sans révéler les secrets
-            safe_oauth = oauth_params.copy()
-            if 'oauth_signature' in safe_oauth:
-                safe_oauth['oauth_signature'] = "***SIGNATURE-HIDDEN***"
-            self.logger.debug(f"OAuth params: {safe_oauth}")
-            self.logger.debug(f"Request data: {request_data}")
-            
-            # CORRECTION: Fusionner les paramètres OAuth et les données de requête dans le corps
-            # Pour Sellsy API v1, tous les paramètres doivent être dans le corps de la requête
+            # Fusion des paramètres OAuth et des données de requête
             data = {**oauth_params, **request_data}
             
-            # Envoi de la requête POST avec tous les paramètres dans le corps
+            # Log des données sensibles masquées
+            debug_data = data.copy()
+            if 'oauth_signature' in debug_data:
+                debug_data['oauth_signature'] = '******'
+            
+            self.logger.debug(f"Requête API: URL={self.API_URL}")
+            self.logger.debug(f"Données de requête: {debug_data}")
+            
+            # Envoi de la requête POST
             response = requests.post(
-                self.API_ENDPOINT,
-                data=data  # Tous les paramètres sont dans le corps
+                self.API_URL,
+                data=data
             )
             
-            # Enregistrement de la réponse brute pour débogage
-            self.logger.debug(f"Status code: {response.status_code}")
-            self.logger.debug(f"Response headers: {dict(response.headers)}")
-            self.logger.debug(f"Response content: {response.text[:500]}")
-            
-            # Vérification de la réponse
+            # Vérification du statut de la réponse
             if response.status_code != 200:
-                self.logger.error(f"❌ Statut HTTP erreur: {response.status_code}")
-                # Vérifier si c'est une erreur OAuth et l'afficher
+                self.logger.error(f"❌ Erreur HTTP: {response.status_code}")
+                self.logger.error(f"Détails: {response.text}")
+                
+                # Vérifier s'il s'agit d'une erreur OAuth spécifique
                 if "oauth_problem" in response.text:
                     self.logger.error(f"❌ Erreur OAuth: {response.text}")
                 return None
             
-            # Tentative de conversion de la réponse en JSON
+            # Traitement de la réponse
             try:
                 result = response.json()
-            except ValueError:
-                self.logger.error(f"❌ Réponse non-JSON: {response.text}")
+                
+                # Vérification des erreurs dans la réponse JSON
+                if isinstance(result, dict):
+                    if result.get('status') == 'error':
+                        self.logger.error(f"❌ Erreur API: {result.get('error')}")
+                        return result
+                
+                self.logger.debug(f"Réponse reçue: {json.dumps(result)[:200]}...")
+                return result
+            except json.JSONDecodeError:
+                self.logger.error(f"❌ Réponse non-JSON: {response.text[:200]}")
                 return None
-            
-            # Vérification des erreurs dans la réponse
-            if isinstance(result, dict) and "error" in result:
-                self.logger.error(f"❌ Erreur API Sellsy: {result['error']}")
-                return None
-            
-            return result
-            
+                
         except requests.RequestException as e:
-            self.logger.error(f"❌ Erreur lors de la requête à l'API Sellsy: {str(e)}")
-            if hasattr(e, 'response') and e.response:
-                self.logger.error(f"Status code: {e.response.status_code}")
-                self.logger.error(f"Détails: {e.response.text if hasattr(e.response, 'text') else 'Pas de réponse'}")
-            return None
-        except ValueError as e:
-            # Erreur lors du décodage JSON
-            self.logger.error(f"❌ Erreur de décodage JSON: {str(e)}")
+            self.logger.error(f"❌ Erreur de connexion: {str(e)}")
             return None
         except Exception as e:
             self.logger.error(f"❌ Erreur inattendue: {str(e)}")
+            self.logger.exception("Détails:")
             return None
     
-    def test_authentication(self) -> bool:
+    def _prepare_oauth_params(self) -> Dict:
         """
-        Teste l'authentification à l'API Sellsy v1.
+        Prépare les paramètres OAuth conformément à la documentation Sellsy.
         
         Returns:
-            bool: True si l'authentification est réussie, False sinon
+            Paramètres OAuth
         """
-        self.logger.info("🔄 Test d'authentification Sellsy...")
+        # Génération des valeurs OAuth requises
+        nonce = str(random.getrandbits(64))
+        timestamp = str(int(time.time()))
         
-        try:
-            # Utilisation de la méthode Infos.getInfos pour tester l'authentification
-            method = {
-                "method": "Infos.getInfos"
-            }
-            
-            result = self._make_request(method)
-            
-            if result:
-                self.logger.info("✅ Authentification Sellsy réussie")
-                return True
-            else:
-                self.logger.error("❌ Échec de l'authentification Sellsy")
-                return False
-                
-        except Exception as e:
-            self.logger.error(f"❌ Erreur lors du test d'authentification: {str(e)}")
-            return False
+        # Signature PLAINTEXT selon la documentation
+        # La signature est consumer_secret&user_secret sans encodage URL
+        signature = f"{self.consumer_secret}&{self.user_secret}"
+        
+        # Paramètres OAuth
+        oauth_params = {
+            'oauth_consumer_key': self.consumer_token,
+            'oauth_token': self.user_token,
+            'oauth_signature_method': 'PLAINTEXT',
+            'oauth_signature': signature,
+            'oauth_timestamp': timestamp,
+            'oauth_nonce': nonce,
+            'oauth_version': '1.0'
+        }
+        
+        return oauth_params
     
     def create_client(self, client_data: Dict) -> Optional[Dict]:
         """
-        Crée un nouveau client dans Sellsy v1.
+        Crée un nouveau client dans Sellsy.
         
         Args:
-            client_data: Données du client à créer formatées pour l'API v2
+            client_data: Données du client à créer (format v2)
             
         Returns:
             Réponse de l'API ou None en cas d'erreur
         """
-        self.logger.info("📤 Tentative de création d'un client dans Sellsy")
-        
-        # Vérifier l'authentification avant de procéder
-        if not self.test_authentication():
-            return None
+        self.logger.info("🔄 Création d'un nouveau client dans Sellsy")
         
         try:
-            # Conversion des données du format v2 au format v1
+            # Conversion des données client au format v1
             v1_client_data = self._convert_v2_to_v1_format(client_data)
             
-            # Création de la requête pour l'API v1
-            method = {
+            # Préparation de la requête
+            request_settings = {
                 "method": "Client.create",
                 "params": v1_client_data
             }
             
-            # Masquer les données sensibles pour le log
-            log_data = method.copy()
-            if "params" in log_data and "third" in log_data["params"] and "email" in log_data["params"]["third"]:
-                log_data["params"]["third"]["email"] = "***@***.com"
-            if "params" in log_data and "contact" in log_data["params"] and "email" in log_data["params"]["contact"]:
-                log_data["params"]["contact"]["email"] = "***@***.com"
-                
-            self.logger.debug(f"Données envoyées à l'API v1: {json.dumps(log_data)}")
+            # Exécution de la requête
+            self.logger.debug(f"Données client formatées: {v1_client_data}")
+            response = self.request_api(request_settings)
             
-            # Envoi de la requête
-            result = self._make_request(method)
-            
-            if result:
-                client_id = result.get("response")
-                self.logger.info(f"✅ Client créé avec succès dans Sellsy (ID: {client_id})")
+            if response and response.get('status') == 'success':
+                # Extraction de l'ID client de la réponse
+                client_id = response.get('response')
+                self.logger.info(f"✅ Client créé avec succès! ID: {client_id}")
                 return {"status": "success", "response": {"id": client_id}}
             else:
-                self.logger.error("❌ Échec de la création du client")
-                return None
-            
+                error_msg = "Réponse API invalide"
+                if response and 'error' in response:
+                    error_msg = response.get('error')
+                self.logger.error(f"❌ Échec de création du client: {error_msg}")
+                return response
+                
         except Exception as e:
             self.logger.error(f"❌ Erreur lors de la création du client: {str(e)}")
+            self.logger.exception("Détails:")
             return None
     
     def _convert_v2_to_v1_format(self, v2_data: Dict) -> Dict:
         """
-        Convertit les données du format API v2 au format API v1.
+        Convertit les données client du format v2 au format v1 attendu par l'API.
         
         Args:
-            v2_data: Données client au format API v2
+            v2_data: Données client au format v2
             
         Returns:
-            Données client au format API v1
+            Données client au format v1
         """
         # Récupération des données de base
+        client_type = "person" if v2_data.get("type") == "person" else "corporation"
         name = v2_data.get("name", "")
         email = v2_data.get("email", "")
         phone = v2_data.get("phone", "")
@@ -235,7 +229,7 @@ class SellsyAPI:
                 "name": name,
                 "email": email,
                 "tel": phone,
-                "type": "person" if v2_data.get("type") == "person" else "corporation"
+                "type": client_type
             },
             "contact": {
                 "name": lastname,
@@ -256,58 +250,85 @@ class SellsyAPI:
         
         return v1_data
     
+    def test_authentication(self) -> bool:
+        """
+        Teste l'authentification en récupérant les informations sur l'API.
+        
+        Returns:
+            True si l'authentification est réussie, False sinon
+        """
+        self.logger.info("🔄 Test d'authentification Sellsy...")
+        
+        try:
+            # Appel à une méthode simple pour tester l'authentification
+            request_settings = {
+                "method": "Infos.getInfos"
+            }
+            
+            response = self.request_api(request_settings)
+            
+            if response and response.get('status') == 'success':
+                self.logger.info("✅ Authentification réussie!")
+                return True
+            else:
+                self.logger.error("❌ Échec d'authentification")
+                return False
+                
+        except Exception as e:
+            self.logger.error(f"❌ Erreur lors du test d'authentification: {str(e)}")
+            return False
+    
     def get_client(self, client_id: str) -> Optional[Dict]:
         """
-        Récupère les détails d'un client.
+        Récupère les informations d'un client par son ID.
         
         Args:
             client_id: ID du client à récupérer
             
         Returns:
-            Données du client ou None en cas d'erreur
+            Informations du client ou None en cas d'erreur
         """
-        if not self.test_authentication():
-            return None
-            
+        self.logger.info(f"🔄 Récupération du client ID: {client_id}")
+        
         try:
-            # Création de la requête pour l'API v1
-            method = {
+            # Préparation de la requête
+            request_settings = {
                 "method": "Client.getOne",
                 "params": {
                     "clientid": client_id
                 }
             }
             
-            # Envoi de la requête
-            result = self._make_request(method)
+            # Exécution de la requête
+            response = self.request_api(request_settings)
             
-            if result:
-                return {"status": "success", "response": result.get("response")}
+            if response and response.get('status') == 'success':
+                self.logger.info(f"✅ Client récupéré avec succès")
+                return response
             else:
-                self.logger.error(f"❌ Échec de la récupération du client {client_id}")
-                return None
-            
+                self.logger.error(f"❌ Échec de récupération du client")
+                return response
+                
         except Exception as e:
-            self.logger.error(f"❌ Erreur lors de la récupération du client {client_id}: {str(e)}")
+            self.logger.error(f"❌ Erreur lors de la récupération du client: {str(e)}")
             return None
     
-    def search_clients(self, search_term: str = None, limit: int = 100) -> Optional[Dict]:
+    def search_clients(self, search_term=None, limit=100) -> Optional[Dict]:
         """
         Recherche des clients dans Sellsy.
         
         Args:
-            search_term: Terme de recherche
-            limit: Nombre maximum de résultats
+            search_term: Terme de recherche (facultatif)
+            limit: Nombre maximum de résultats à retourner
             
         Returns:
             Liste des clients ou None en cas d'erreur
         """
-        if not self.test_authentication():
-            return None
-            
+        self.logger.info(f"🔄 Recherche de clients" + (f" avec terme: {search_term}" if search_term else ""))
+        
         try:
-            # Création de la requête pour l'API v1
-            method = {
+            # Préparation de la requête
+            request_settings = {
                 "method": "Client.getList",
                 "params": {
                     "pagination": {
@@ -317,21 +338,23 @@ class SellsyAPI:
                 }
             }
             
-            # Ajout du terme de recherche si présent
+            # Ajout du terme de recherche si fourni
             if search_term:
-                method["params"]["search"] = {
+                request_settings["params"]["search"] = {
                     "contains": search_term
                 }
             
-            # Envoi de la requête
-            result = self._make_request(method)
+            # Exécution de la requête
+            response = self.request_api(request_settings)
             
-            if result:
-                return {"status": "success", "response": result.get("response")}
+            if response and response.get('status') == 'success':
+                result_count = len(response.get('response', {}).get('result', {}))
+                self.logger.info(f"✅ {result_count} clients trouvés")
+                return response
             else:
-                self.logger.error("❌ Échec de la recherche de clients")
-                return None
-            
+                self.logger.error(f"❌ Échec de la recherche de clients")
+                return response
+                
         except Exception as e:
             self.logger.error(f"❌ Erreur lors de la recherche de clients: {str(e)}")
             return None
