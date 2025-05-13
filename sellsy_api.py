@@ -1,50 +1,57 @@
 import os
 import time
-import hashlib
-import hmac
-import base64
 import json
 import requests
-from urllib.parse import urlencode
+from requests_oauthlib import OAuth1
 
-# Clés API Sellsy V1 depuis les secrets GitHub
-CONSUMER_TOKEN = os.getenv("SELLSY_API_CONSUMER_TOKEN")
-CONSUMER_SECRET = os.getenv("SELLSY_API_CONSUMER_SECRET")
-USER_TOKEN = os.getenv("SELLSY_API_USER_TOKEN")
-USER_SECRET = os.getenv("SELLSY_API_USER_SECRET")
+class SellsyAPI:
+    BASE_URL = "https://api.sellsy.com/0/"
+    
+    def __init__(self, consumer_token, consumer_secret, user_token, user_secret):
+        self.oauth = OAuth1(
+            consumer_token,
+            consumer_secret,
+            user_token,
+            user_secret
+        )
+    
+    def make_request(self, method, params):
+        """
+        Effectue une requête à l'API Sellsy en utilisant OAuth1
+        """
+        try:
+            response = requests.post(
+                self.BASE_URL,
+                data={"request": 1, "io_mode": "json"},
+                files={"do_in": (None, json.dumps({"method": method, "params": params}))},
+                auth=self.oauth
+            )
+            
+            response.raise_for_status()
+            return response.json()
+        
+        except requests.RequestException as e:
+            print(f"Erreur lors de la requête Sellsy {method}: {e}")
+            return None
 
-SELLSY_API_URL = "https://apifeed.sellsy.com/0/"
+    def create_client(self, client_data):
+        """
+        Crée un client dans Sellsy
+        
+        client_data doit contenir au minimum:
+        - name: nom du client
+        - email: email du client
+        """
+        return self.make_request("Client.create", {"third": client_data})
 
-def sellsy_request(method, params):
-    request_data = {
-        'method': method,
-        'params': params
-    }
+    def search_client(self, query):
+        """
+        Recherche un client dans Sellsy
+        """
+        return self.make_request("Client.getList", {"search": {"contains": query}})
 
-    # Construction du header OAuth1 manuellement
-    oauth_nonce = base64.b64encode(os.urandom(32)).decode('utf-8').rstrip('=')
-    oauth_timestamp = str(int(time.time()))
-    oauth_params = {
-        'oauth_consumer_key': CONSUMER_TOKEN,
-        'oauth_token': USER_TOKEN,
-        'oauth_nonce': oauth_nonce,
-        'oauth_timestamp': oauth_timestamp,
-        'oauth_signature_method': 'HMAC-SHA1',
-        'oauth_version': '1.0'
-    }
-
-    # Construction de la base string
-    base_params = oauth_params.copy()
-    base_string = "POST&" + urlencode({'': SELLSY_API_URL})[1:] + "&" + urlencode(sorted(base_params.items()))
-    signing_key = f"{CONSUMER_SECRET}&{USER_SECRET}"
-    signature = base64.b64encode(hmac.new(signing_key.encode(), base_string.encode(), hashlib.sha1).digest()).decode()
-    oauth_params['oauth_signature'] = signature
-
-    auth_header = 'OAuth ' + ', '.join([f'{k}="{v}"' for k, v in oauth_params.items()])
-    headers = {
-        'Authorization': auth_header,
-        'Content-Type': 'application/json'
-    }
-
-    response = requests.post(SELLSY_API_URL, headers=headers, data=json.dumps(request_data))
-    return response.json()
+    def get_client(self, client_id):
+        """
+        Récupère les détails d'un client
+        """
+        return self.make_request("Client.getOne", {"clientid": client_id})
