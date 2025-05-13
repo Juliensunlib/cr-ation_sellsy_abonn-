@@ -29,8 +29,9 @@ class SellsyAPI:
         nonce = str(random.getrandbits(64))
         timestamp = str(int(time.time()))
         
-        # La signature doit être correctement échappée selon les spécifications OAuth
-        signature = urllib.parse.quote(self.consumer_secret) + '&' + urllib.parse.quote(self.user_secret)
+        # La signature doit être exactement dans ce format pour l'API Sellsy v1
+        # sans espaces supplémentaires entre "&" et sans échappement URL
+        signature = f"{self.consumer_secret}&{self.user_secret}"
         
         oauth_params = {
             'oauth_consumer_key': self.consumer_token,
@@ -85,7 +86,12 @@ class SellsyAPI:
             self.logger.debug(f"Response content: {response.text[:500]}")  # Montrer plus de contenu pour le débogage
             
             # Vérification de la réponse
-            response.raise_for_status()
+            if response.status_code != 200:
+                self.logger.error(f"❌ Statut HTTP erreur: {response.status_code}")
+                # Vérifier si c'est une erreur OAuth et l'afficher
+                if "oauth_problem" in response.text:
+                    self.logger.error(f"❌ Erreur OAuth: {response.text}")
+                return None
             
             # Tentative de conversion de la réponse en JSON
             # Si la réponse n'est pas du JSON valide, traitons-la comme une erreur
@@ -106,7 +112,7 @@ class SellsyAPI:
             self.logger.error(f"❌ Erreur lors de la requête à l'API Sellsy: {str(e)}")
             if hasattr(e, 'response') and e.response:
                 self.logger.error(f"Status code: {e.response.status_code}")
-                self.logger.error(f"Détails: {response.text if 'response' in locals() else 'Pas de réponse'}")
+                self.logger.error(f"Détails: {e.response.text if hasattr(e.response, 'text') else 'Pas de réponse'}")
             return None
         except ValueError as e:
             # Erreur lors du décodage JSON
