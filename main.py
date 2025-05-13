@@ -65,6 +65,19 @@ class ClientSynchronizer:
     
     def __init__(self):
         """Initialise les API clients."""
+        # Vérification et initialisation des clés API
+        if not all([
+            Config.AIRTABLE_API_KEY, 
+            Config.AIRTABLE_BASE_ID, 
+            Config.AIRTABLE_TABLE_NAME,
+            Config.SELLSY_API_CONSUMER_TOKEN,
+            Config.SELLSY_API_CONSUMER_SECRET,
+            Config.SELLSY_API_USER_TOKEN,
+            Config.SELLSY_API_USER_SECRET
+        ]):
+            logger.error("❌ Paramètres de configuration manquants")
+            raise ValueError("Configuration incomplète")
+        
         self.airtable_api = AirtableAPI(
             Config.AIRTABLE_API_KEY,
             Config.AIRTABLE_BASE_ID,
@@ -79,6 +92,24 @@ class ClientSynchronizer:
             Config.SELLSY_API_USER_SECRET,
             logger
         )
+        
+        # Test de l'authentification Sellsy
+        if not self.test_sellsy_connection():
+            logger.error("❌ Échec de la connexion à l'API Sellsy")
+            raise ConnectionError("L'authentification Sellsy a échoué")
+        
+        # Stockage temporaire du résultat de synchronisation
+        self.sync_result = None
+    
+    def test_sellsy_connection(self) -> bool:
+        """
+        Teste la connexion à l'API Sellsy.
+        
+        Returns:
+            True si la connexion réussit, False sinon
+        """
+        logger.info("🔄 Test de connexion à l'API Sellsy...")
+        return self.sellsy_api.test_authentication()
     
     def sanitize_client_data(self, record_fields: Dict) -> Optional[Dict]:
         """
@@ -119,24 +150,27 @@ class ClientSynchronizer:
             logger.warning(f"⚠️ Format d'email invalide: {email}")
             return None
         
-        # Format en suivant le format v2 pour être converti en format v1 dans l'API Sellsy
+        # Format en suivant le format attendu par l'API Sellsy v1 (plus direct sans passer par v2)
         client_data = {
-            "type": "person",
-            "name": f"{nom} {prenom}",
-            "email": email,
-            "phone": telephone,
+            "third": {
+                "name": f"{nom} {prenom}",
+                "email": email,
+                "tel": telephone,
+                "type": "person"  # Personne physique par défaut
+            },
             "contact": {
                 "name": nom,
-                "firstName": prenom,
+                "firstname": prenom,
                 "email": email,
-                "mobile": telephone
+                "tel": telephone,
+                "position": "Client"
             },
             "address": {
                 "name": "Adresse principale",
-                "address": adresse,
-                "zipcode": code_postal,
-                "city": ville,
-                "countryCode": "FR"  # Par défaut France
+                "part1": adresse,
+                "zip": code_postal,
+                "town": ville,
+                "countrycode": "FR"  # Par défaut France
             }
         }
         
@@ -151,7 +185,9 @@ class ClientSynchronizer:
             record: Enregistrement Airtable à synchroniser
         """
         record_fields = record.get('fields', {})
-        logger.info(f"🔄 Début de synchronisation pour l'enregistrement : {record['id']}")
+        record_id = record.get('id', 'inconnu')
+        
+        logger.info(f"🔄 Début de synchronisation pour l'enregistrement : {record_id}")
         
         # Réinitialiser le résultat de synchronisation
         self.sync_result = None
@@ -160,7 +196,7 @@ class ClientSynchronizer:
         formatted_data = self.sanitize_client_data(record_fields)
         
         if not formatted_data:
-            logger.warning("⏩ Synchronisation ignorée pour cet enregistrement - données insuffisantes")
+            logger.warning(f"⏩ Synchronisation ignorée pour {record_id} - données insuffisantes")
             return
         
         try:
@@ -170,24 +206,13 @@ class ClientSynchronizer:
             if response:
                 # Vérification de la réponse
                 if response.get("status") == "success":
-                    # Extraction de l'ID client
-                    client_id = None
-                    
-                    if "response" in response and isinstance(response["response"], dict):
-                        client_id = response["response"].get("id")
+                    # Dans l'API Sellsy v1, l'ID client est directement dans response si réussite
+                    client_id = response.get("response")
                     
                     if client_id:
                         logger.info(f"✅ Client créé avec succès dans Sellsy. ID: {client_id}")
                         # Stocker le résultat pour le wrapper
                         self.sync_result = {"id": client_id}
-                        
-                        # Mise à jour d'Airtable avec le nouvel ID Sellsy (sera remplacée par le wrapper)
-                        update_result = self.airtable_api.update_record(record['id'], {'ID_Sellsy': str(client_id)})
-                        
-                        if update_result:
-                            logger.info(f"✅ Mise à jour de l'ID Sellsy dans Airtable réussie")
-                        else:
-                            logger.error(f"❌ Échec de la mise à jour de l'ID Sellsy dans Airtable")
                     else:
                         logger.error(f"❌ Impossible de trouver l'ID client dans la réponse: {response}")
                 else:
@@ -200,8 +225,13 @@ class ClientSynchronizer:
             logger.error(f"❌ Erreur lors de la synchronisation : {str(e)}")
             logger.exception("Détails de l'erreur:")
 
-def check_configuration():
-    """Vérifie que toute la configuration nécessaire est présente."""
+def check_configuration() -> bool:
+    """
+    Vérifie que toute la configuration nécessaire est présente.
+    
+    Returns:
+        True si la configuration est complète, False sinon
+    """
     missing_configs = []
     
     if not Config.AIRTABLE_API_KEY:
@@ -231,6 +261,37 @@ def check_configuration():
     
     return True
 
+def identify_sellsy_id_field(sample_records: List[Dict]) -> str:
+    """
+    Identifie le champ utilisé pour stocker l'ID Sellsy dans Airtable.
+    
+    Args:
+        sample_records: Liste d'enregistrements Airtable pour analyse
+    
+    Returns:
+        Nom du champ identifié ou 'ID_Sellsy' par défaut
+    """
+    possible_id_fields = [
+        "ID_Sellsy", "Id_Sellsy", "id_sellsy", "ID Sellsy", "Id Sellsy", 
+        "id sellsy", "IDSellsy", "Sellsy ID", "sellsy_id", "sellsy-id"
+    ]
+    
+    if not sample_records or len(sample_records) == 0:
+        logger.warning("⚠️ Aucun enregistrement disponible pour identification du champ ID Sellsy")
+        return "ID_Sellsy"
+    
+    sample_fields = sample_records[0].get('fields', {})
+    logger.debug(f"Champs disponibles dans Airtable: {list(sample_fields.keys())}")
+    
+    # Vérification des champs possibles
+    for field in possible_id_fields:
+        if field in sample_fields:
+            logger.info(f"✓ Champ d'ID Sellsy identifié : {field}")
+            return field
+    
+    logger.warning("⚠️ Impossible de déterminer le champ ID Sellsy. Utilisation par défaut: 'ID_Sellsy'")
+    return "ID_Sellsy"
+
 def main():
     """Fonction principale de synchronisation."""
     logger.info("🚀 Démarrage de la synchronisation des clients")
@@ -239,102 +300,90 @@ def main():
     try:
         # Vérification des configurations
         if not check_configuration():
+            logger.error("❌ Configuration incomplète. Arrêt du processus.")
             return
+        
+        try:    
+            # Initialisation du synchroniseur
+            synchronizer = ClientSynchronizer()
             
-        # Initialisation du synchroniseur
-        synchronizer = ClientSynchronizer()
-        
-        # Récupération des enregistrements à synchroniser
-        # Liste plus complète de noms possibles pour le champ ID Sellsy
-        possible_id_fields = ["ID_Sellsy", "Id_Sellsy", "id_sellsy", "ID Sellsy", "Id Sellsy", 
-                             "id sellsy", "IDSellsy", "Sellsy ID", "sellsy_id", "sellsy-id"]
-        
-        # D'abord, récupérons un enregistrement pour examiner les noms de champs
-        sample_records = synchronizer.airtable_api.get_records(None, 1)
-        sellsy_id_field = None
-        
-        if sample_records and len(sample_records) > 0:
-            sample_fields = sample_records[0].get('fields', {})
-            logger.debug(f"Champs disponibles dans Airtable: {list(sample_fields.keys())}")
+            # Récupération d'un échantillon pour identifier le champ ID Sellsy
+            sample_records = synchronizer.airtable_api.get_records(None, 1)
+            sellsy_id_field = identify_sellsy_id_field(sample_records)
             
-            # Vérifions quel champ est utilisé pour l'ID Sellsy
-            for field in possible_id_fields:
-                if field in sample_fields:
-                    sellsy_id_field = field
-                    logger.info(f"✓ Champ d'ID Sellsy identifié : {sellsy_id_field}")
-                    break
-        
-        if not sellsy_id_field:
-            logger.warning("⚠️ Impossible de déterminer le champ ID Sellsy. Utilisation par défaut: 'ID_Sellsy'")
-            sellsy_id_field = "ID_Sellsy"
-        
-        # Maintenant, récupérons tous les enregistrements pour filtrer côté client
-        # au lieu de faire confiance au filtrage Airtable qui peut être problématique
-        logger.info(f"🔍 Récupération de tous les enregistrements pour filtrage local")
-        
-        try:
-            # Récupérons tous les enregistrements
+            # Récupération de tous les enregistrements
+            logger.info(f"🔍 Récupération de tous les enregistrements pour filtrage local")
             all_records = synchronizer.airtable_api.get_records()
             logger.info(f"📊 Nombre total d'enregistrements dans Airtable: {len(all_records)}")
             
-            # Filtrons côté client les enregistrements sans ID Sellsy
+            # Filtrage des enregistrements sans ID Sellsy
             records_to_sync = []
-            empty_count = 0
-            
             for record in all_records:
                 fields = record.get('fields', {})
                 
                 # Vérifier si le champ existe et n'est pas vide
-                if sellsy_id_field not in fields or fields.get(sellsy_id_field) is None:
+                if sellsy_id_field not in fields or not fields.get(sellsy_id_field):
                     records_to_sync.append(record)
-                    empty_count += 1
                     continue
                 
                 # Vérifier si le champ contient une valeur vide, des espaces ou "None"
                 id_value = str(fields.get(sellsy_id_field, "")).strip()
                 if id_value == "" or id_value.lower() == "none":
                     records_to_sync.append(record)
-                    empty_count += 1
                     # Log pour débug
                     logger.debug(f"Enregistrement sans ID valide trouvé: {record['id']} - Valeur: '{id_value}'")
             
-            logger.info(f"📝 Nombre d'enregistrements à synchroniser après filtrage local: {empty_count}")
+            logger.info(f"📝 Nombre d'enregistrements à synchroniser: {len(records_to_sync)}")
             
-            # Affichons les premiers enregistrements pour débogage
+            # Affichage des premiers enregistrements pour débogage
             if records_to_sync and len(records_to_sync) > 0:
-                for idx, record in enumerate(records_to_sync[:5]):  # Afficher les 5 premiers pour le debug
+                for idx, record in enumerate(records_to_sync[:3]):  # Afficher les 3 premiers pour le debug
                     logger.debug(f"Enregistrement #{idx+1} à synchroniser: {json.dumps({k: v for k, v in record.get('fields', {}).items() if k in ['Nom', 'Prenom', 'Email']})}")
                 
-                # Mise à jour de la fonction synchronize_client pour utiliser le bon champ
-                original_sync_client = synchronizer.synchronize_client
+                # Création d'un wrapper pour la synchronisation qui utilise le bon champ
                 def sync_client_wrapper(record):
                     try:
-                        original_sync_client(record)
-                        # Si la synchronisation réussit, mettre à jour avec le bon nom de champ
+                        # Synchronisation du client avec Sellsy
+                        synchronizer.synchronize_client(record)
+                        
+                        # Si la synchronisation réussit, mettre à jour le champ ID Sellsy
                         if hasattr(synchronizer, 'sync_result') and synchronizer.sync_result:
                             client_id = synchronizer.sync_result.get('id')
                             if client_id:
-                                synchronizer.airtable_api.update_record(record['id'], {sellsy_id_field: str(client_id)})
+                                update_result = synchronizer.airtable_api.update_record(
+                                    record['id'], 
+                                    {sellsy_id_field: str(client_id)}
+                                )
+                                
+                                if update_result:
+                                    logger.info(f"✅ ID Sellsy {client_id} mis à jour dans Airtable (champ: {sellsy_id_field})")
+                                else:
+                                    logger.error(f"❌ Échec de la mise à jour de l'ID Sellsy dans Airtable")
                     except Exception as e:
                         logger.error(f"❌ Erreur dans le wrapper de synchronisation: {str(e)}")
                 
-                # Remplacer temporairement la méthode
-                synchronizer.synchronize_client = sync_client_wrapper
-            
-            if not records_to_sync:
-                logger.info("⏹️ Aucun client sans ID Sellsy à synchroniser.")
-                return
+                # Si aucun enregistrement à synchroniser, terminer
+                if not records_to_sync:
+                    logger.info("⏹️ Aucun client sans ID Sellsy à synchroniser.")
+                    return
                 
-            logger.info(f"🔄 Synchronisation de {len(records_to_sync)} clients")
-            
-            # Synchronisation de chaque client
-            for record in records_to_sync:
-                synchronizer.synchronize_client(record)
-                # Pause légère entre les requêtes pour respecter les limites d'API
-                time.sleep(1)
-            
+                logger.info(f"🔄 Synchronisation de {len(records_to_sync)} clients")
+                
+                # Synchronisation de chaque client
+                for i, record in enumerate(records_to_sync):
+                    logger.info(f"Client {i+1}/{len(records_to_sync)}")
+                    sync_client_wrapper(record)
+                    # Pause légère entre les requêtes pour respecter les limites d'API
+                    time.sleep(1)
+            else:
+                logger.info("⏹️ Aucun client à synchroniser")
+                
+        except (ValueError, ConnectionError) as e:
+            logger.error(f"❌ Erreur critique: {str(e)}")
+            return
+        
         except Exception as e:
-            logger.error(f"❌ Erreur lors de la récupération des enregistrements: {str(e)}")
+            logger.error(f"❌ Erreur lors de la récupération/traitement des enregistrements: {str(e)}")
             logger.exception("Détails de l'erreur:")
             return
         
