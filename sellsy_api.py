@@ -135,9 +135,11 @@ class SellsyAPI:
         nonce = str(random.getrandbits(64))
         timestamp = str(int(time.time()))
         
-        # Signature PLAINTEXT selon la documentation
-        # La signature est consumer_secret&user_secret sans encodage URL
-        signature = f"{self.consumer_secret}&{self.user_secret}"
+        # Création de la signature
+        # Pour PLAINTEXT, la signature doit être encodée en URL selon la spécification OAuth
+        consumer_secret_encoded = urllib.parse.quote(self.consumer_secret, safe='')
+        user_secret_encoded = urllib.parse.quote(self.user_secret, safe='')
+        signature = f"{consumer_secret_encoded}&{user_secret_encoded}"
         
         # Paramètres OAuth
         oauth_params = {
@@ -182,7 +184,7 @@ class SellsyAPI:
                 # Extraction de l'ID client de la réponse
                 client_id = response.get('response')
                 self.logger.info(f"✅ Client créé avec succès! ID: {client_id}")
-                return {"status": "success", "response": {"id": client_id}}
+                return {"status": "success", "response": client_id}
             else:
                 error_msg = "Réponse API invalide"
                 if response and 'error' in response:
@@ -205,47 +207,16 @@ class SellsyAPI:
         Returns:
             Données client au format v1
         """
-        # Récupération des données de base
-        client_type = "person" if v2_data.get("type") == "person" else "corporation"
-        name = v2_data.get("name", "")
-        email = v2_data.get("email", "")
-        phone = v2_data.get("phone", "")
-        
-        # Récupération des données de contact
+        # Extraction des données depuis la structure attendue
+        third = v2_data.get("third", {})
         contact = v2_data.get("contact", {})
-        lastname = contact.get("name", "")
-        firstname = contact.get("firstName", "")
-        
-        # Récupération des données d'adresse
         address = v2_data.get("address", {})
-        street = address.get("address", "")
-        zipcode = address.get("zipcode", "")
-        town = address.get("city", "")
-        country_code = address.get("countryCode", "FR")
         
         # Construction des données au format v1
         v1_data = {
-            "third": {
-                "name": name,
-                "email": email,
-                "tel": phone,
-                "type": client_type
-            },
-            "contact": {
-                "name": lastname,
-                "firstname": firstname,
-                "email": email,
-                "tel": phone,
-                "position": "Client",
-                "civil": "man"  # Valeur par défaut
-            },
-            "address": {
-                "name": "Adresse principale",
-                "part1": street,
-                "zip": zipcode,
-                "town": town,
-                "countrycode": country_code
-            }
+            "third": third,
+            "contact": contact,
+            "address": address
         }
         
         return v1_data
