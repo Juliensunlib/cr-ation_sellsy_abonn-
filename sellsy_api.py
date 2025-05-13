@@ -29,8 +29,8 @@ class SellsyAPI:
         nonce = str(random.getrandbits(64))
         timestamp = str(int(time.time()))
         
-        # La signature doit être exactement dans ce format pour l'API Sellsy v1
-        # sans espaces supplémentaires entre "&" et sans échappement URL
+        # Construction correcte de la signature pour Sellsy API v1
+        # La signature de base doit être les secrets séparés par & SANS URL ENCODE
         signature = f"{self.consumer_secret}&{self.user_secret}"
         
         oauth_params = {
@@ -66,24 +66,27 @@ class SellsyAPI:
                 'do_in': json.dumps(method)
             }
             
-            # Affichage des détails pour le débogage (ne pas inclure les secrets complets)
+            # Cloner les oauth_params pour le log sans révéler les secrets
             safe_oauth = oauth_params.copy()
             if 'oauth_signature' in safe_oauth:
                 safe_oauth['oauth_signature'] = "***SIGNATURE-HIDDEN***"
             self.logger.debug(f"OAuth params: {safe_oauth}")
             self.logger.debug(f"Request data: {request_data}")
             
-            # Envoi de la requête POST
+            # CORRECTION: Fusionner les paramètres OAuth et les données de requête dans le corps
+            # Pour Sellsy API v1, tous les paramètres doivent être dans le corps de la requête
+            data = {**oauth_params, **request_data}
+            
+            # Envoi de la requête POST avec tous les paramètres dans le corps
             response = requests.post(
                 self.API_ENDPOINT,
-                params=oauth_params,  # Paramètres OAuth dans l'URL
-                data=request_data     # Données dans le corps de la requête
+                data=data  # Tous les paramètres sont dans le corps
             )
             
             # Enregistrement de la réponse brute pour débogage
             self.logger.debug(f"Status code: {response.status_code}")
             self.logger.debug(f"Response headers: {dict(response.headers)}")
-            self.logger.debug(f"Response content: {response.text[:500]}")  # Montrer plus de contenu pour le débogage
+            self.logger.debug(f"Response content: {response.text[:500]}")
             
             # Vérification de la réponse
             if response.status_code != 200:
@@ -94,7 +97,6 @@ class SellsyAPI:
                 return None
             
             # Tentative de conversion de la réponse en JSON
-            # Si la réponse n'est pas du JSON valide, traitons-la comme une erreur
             try:
                 result = response.json()
             except ValueError:
