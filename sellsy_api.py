@@ -13,7 +13,8 @@ class SellsyAPI:
     
     # URL de l'API v2
     API_BASE_URL = "https://api.sellsy.com/v2"
-    AUTH_URL = "https://login.sellsy.com/oauth2/access-token"
+    # URL correcte pour l'authentification OAuth2 de Sellsy v2
+    AUTH_URL = "https://api.sellsy.com/oauth2/access-token"
     
     def __init__(self, client_id, client_secret, access_token=None, refresh_token=None, logger=None):
         """
@@ -79,17 +80,32 @@ class SellsyAPI:
         try:
             self.logger.info("🔄 Obtention d'un nouveau token d'accès...")
             
+            # En-têtes pour l'authentification Basic
+            auth = (self.client_id, self.client_secret)
+            
+            # Paramètres de la requête
             payload = {
-                "grant_type": "client_credentials",
-                "client_id": self.client_id,
-                "client_secret": self.client_secret
+                "grant_type": "client_credentials"
             }
             
-            response = requests.post(self.AUTH_URL, data=payload)
+            # En-têtes pour spécifier le type de contenu
+            headers = {
+                "Content-Type": "application/x-www-form-urlencoded"
+            }
+            
+            response = requests.post(
+                self.AUTH_URL, 
+                auth=auth,
+                data=payload,
+                headers=headers
+            )
             
             if response.status_code == 200:
                 data = response.json()
                 self.access_token = data["access_token"]
+                # Le refresh token est généralement fourni avec le grant_type=authorization_code
+                if "refresh_token" in data:
+                    self.refresh_token = data["refresh_token"]
                 # Calcul de la date d'expiration (généralement 3600 secondes)
                 expires_in = data.get("expires_in", 3600)
                 self.token_expires_at = datetime.now() + timedelta(seconds=expires_in - 60)  # -60 pour marge de sécurité
@@ -116,19 +132,29 @@ class SellsyAPI:
             try:
                 self.logger.info("🔄 Rafraîchissement du token d'accès...")
                 
+                auth = (self.client_id, self.client_secret)
+                
                 payload = {
                     "grant_type": "refresh_token",
-                    "client_id": self.client_id,
-                    "client_secret": self.client_secret,
                     "refresh_token": self.refresh_token
                 }
                 
-                response = requests.post(self.AUTH_URL, data=payload)
+                headers = {
+                    "Content-Type": "application/x-www-form-urlencoded"
+                }
+                
+                response = requests.post(
+                    self.AUTH_URL, 
+                    auth=auth,
+                    data=payload,
+                    headers=headers
+                )
                 
                 if response.status_code == 200:
                     data = response.json()
                     self.access_token = data["access_token"]
-                    self.refresh_token = data["refresh_token"]
+                    if "refresh_token" in data:
+                        self.refresh_token = data["refresh_token"]
                     expires_in = data.get("expires_in", 3600)
                     self.token_expires_at = datetime.now() + timedelta(seconds=expires_in - 60)
                     
@@ -136,6 +162,7 @@ class SellsyAPI:
                     return True
                 else:
                     self.logger.error(f"❌ Échec du rafraîchissement du token: {response.status_code}")
+                    self.logger.error(f"Détails: {response.text}")
                     return False
                     
             except Exception as e:
@@ -308,7 +335,7 @@ class SellsyAPI:
         if is_individual:
             # Format pour les particuliers (individuals)
             result = {
-                "name": contact.get("firstname", ""),
+                "first_name": contact.get("firstname", ""),
                 "last_name": contact.get("name", ""),
                 "email": contact.get("email", ""),
                 "phone_number": contact.get("tel", ""),
