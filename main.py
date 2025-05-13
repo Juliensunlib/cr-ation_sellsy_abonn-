@@ -11,6 +11,7 @@ from datetime import datetime
 from requests_oauthlib import OAuth1
 
 def setup_logging():
+    """Configure et initialise le système de journalisation."""
     log_dir = 'logs'
     os.makedirs(log_dir, exist_ok=True)
     log_filename = os.path.join(log_dir, f'sync_{datetime.now().strftime("%Y%m%d_%H%M%S")}.log')
@@ -43,6 +44,7 @@ def setup_logging():
 logger = setup_logging()
 
 class Config:
+    """Configuration de l'application à partir des variables d'environnement."""
     AIRTABLE_API_KEY = os.environ.get("AIRTABLE_API_KEY")
     AIRTABLE_BASE_ID = os.environ.get("AIRTABLE_BASE_ID")
     AIRTABLE_TABLE_NAME = os.environ.get("AIRTABLE_TABLE_NAME")
@@ -53,13 +55,22 @@ class Config:
     SELLSY_API_USER_SECRET = os.environ.get("SELLSY_API_USER_SECRET")
 
 class AirtableAPI:
-    BASE_URL = f"https://api.airtable.com/v0/{Config.AIRTABLE_BASE_ID}/{Config.AIRTABLE_TABLE_NAME}"
+    """API client pour Airtable."""
     
     @staticmethod
     def get_records(filter_formula=None) -> List[Dict]:
-        """Récupère les enregistrements d'Airtable selon le filtre spécifié."""
+        """
+        Récupère les enregistrements d'Airtable selon le filtre spécifié.
+        
+        Args:
+            filter_formula: Formule de filtrage Airtable (ex: "BLANK({ID_Sellsy})")
+            
+        Returns:
+            Liste des enregistrements
+        """
         logger.info("🔍 Début de récupération des enregistrements Airtable")
-        logger.debug(f"URL de requête : {AirtableAPI.BASE_URL}")
+        base_url = f"https://api.airtable.com/v0/{Config.AIRTABLE_BASE_ID}/{Config.AIRTABLE_TABLE_NAME}"
+        logger.debug(f"URL de requête : {base_url}")
         
         headers = {
             "Authorization": f"Bearer {Config.AIRTABLE_API_KEY}",
@@ -71,7 +82,9 @@ class AirtableAPI:
 
         try:
             while True:
-                params = {"offset": offset}
+                params = {}
+                if offset:
+                    params["offset"] = offset
                 
                 # Ajout du filtre si spécifié
                 if filter_formula:
@@ -80,7 +93,7 @@ class AirtableAPI:
                 logger.debug(f"Paramètres de requête : {params}")
                 
                 response = requests.get(
-                    AirtableAPI.BASE_URL, 
+                    base_url, 
                     headers=headers, 
                     params=params
                 )
@@ -105,12 +118,24 @@ class AirtableAPI:
         
         except requests.RequestException as e:
             logger.error(f"❌ Erreur lors de la récupération des enregistrements Airtable : {e}")
-            logger.error(f"Détails de l'erreur : {e.response.text if hasattr(e, 'response') else 'Pas de détails supplémentaires'}")
+            if hasattr(e, 'response'):
+                logger.error(f"Status code: {e.response.status_code}")
+                logger.error(f"Détails de l'erreur : {e.response.text}")
             return []
 
     @staticmethod
     def update_record(record_id: str, fields: Dict):
-        """Met à jour un enregistrement dans Airtable."""
+        """
+        Met à jour un enregistrement dans Airtable.
+        
+        Args:
+            record_id: ID de l'enregistrement à mettre à jour
+            fields: Dictionnaire des champs à mettre à jour
+            
+        Returns:
+            Réponse de l'API Airtable
+        """
+        base_url = f"https://api.airtable.com/v0/{Config.AIRTABLE_BASE_ID}/{Config.AIRTABLE_TABLE_NAME}"
         headers = {
             "Authorization": f"Bearer {Config.AIRTABLE_API_KEY}",
             "Content-Type": "application/json"
@@ -118,7 +143,7 @@ class AirtableAPI:
         
         try:
             response = requests.patch(
-                f"{AirtableAPI.BASE_URL}/{record_id}", 
+                f"{base_url}/{record_id}", 
                 headers=headers, 
                 json={"fields": fields}
             )
@@ -127,18 +152,30 @@ class AirtableAPI:
             return response.json()
         except requests.RequestException as e:
             logger.error(f"❌ Erreur lors de la mise à jour de l'enregistrement {record_id} : {e}")
+            if hasattr(e, 'response'):
+                logger.error(f"Status code: {e.response.status_code}")
+                logger.error(f"Détails de l'erreur : {e.response.text}")
             return None
 
 class SellsyAPI:
-    BASE_URL = "https://api.sellsy.com/v2"
-    LEGACY_URL = "https://api.sellsy.com/0"
+    """API client pour Sellsy."""
+    API_URL = "https://apifeed.sellsy.com/0/api"
     
     @staticmethod
     def make_request(method: str, params: Dict) -> Optional[Dict]:
-        """Effectue une requête à l'API Sellsy."""
+        """
+        Effectue une requête à l'API Sellsy.
+        
+        Args:
+            method: Méthode Sellsy à appeler (ex: "Client.create")
+            params: Paramètres de la méthode
+            
+        Returns:
+            Réponse de l'API Sellsy ou None en cas d'erreur
+        """
         logger.info(f"📤 Envoi de la requête Sellsy : {method}")
         
-        # Préparation de la requête selon la documentation Sellsy
+        # Préparation de l'authentification OAuth1
         oauth = OAuth1(
             Config.SELLSY_API_CONSUMER_TOKEN,
             Config.SELLSY_API_CONSUMER_SECRET,
@@ -146,39 +183,41 @@ class SellsyAPI:
             Config.SELLSY_API_USER_SECRET
         )
         
-        # Format spécifique pour l'ancienne API Sellsy
-        data = {
-            'request': 1,
-            'io_mode': 'json',
-            'do_in': json.dumps({
-                'method': method,
-                'params': params
-            })
-        }
-        
         try:
-            # Utilisation de l'URL d'API legacy
+            # Préparation de la requête selon la documentation Sellsy V1
             response = requests.post(
-                f"{SellsyAPI.LEGACY_URL}/do/api/v2", 
-                data=data,
+                SellsyAPI.API_URL, 
+                data={"request": 1, "io_mode": "json"},
+                files={"do_in": (None, json.dumps({
+                    "method": method,
+                    "params": params
+                }))},
                 auth=oauth
             )
             
-            # Vérification du statut de la réponse
+            # Log de la requête pour débogage
+            logger.debug(f"URL: {SellsyAPI.API_URL}")
+            logger.debug(f"Méthode: {method}")
+            logger.debug(f"Paramètres: {json.dumps(params)}")
+            
+            # Vérification du statut de la réponse HTTP
             response.raise_for_status()
             
-            # Log des détails de la réponse pour le débogage
+            # Log des détails de la réponse pour débogage
             logger.debug(f"Status code: {response.status_code}")
             logger.debug(f"Response headers: {response.headers}")
-            logger.debug(f"Response content: {response.text[:200]}...")  # Limitons à 200 caractères
+            logger.debug(f"Response content (début): {response.text[:200]}...")
             
             try:
+                # Tentative de décodage JSON
                 result = response.json()
-                logger.debug(f"📥 Réponse Sellsy pour {method}: {result}")
                 
                 # Vérification du statut de l'API
-                if isinstance(result, dict) and result.get("status") == "error":
-                    logger.error(f"❌ Erreur API Sellsy: {result.get('error')}")
+                if isinstance(result, dict):
+                    if result.get("status") == "error":
+                        logger.error(f"❌ Erreur API Sellsy: {result.get('error')}")
+                    elif result.get("status") == "success":
+                        logger.info(f"✅ Réponse Sellsy réussie pour {method}")
                 
                 return result
             except json.JSONDecodeError as e:
@@ -188,13 +227,25 @@ class SellsyAPI:
             
         except requests.RequestException as e:
             logger.error(f"❌ Erreur lors de la requête Sellsy {method}: {e}")
-            logger.error(f"Détails: {e.response.text if hasattr(e, 'response') and e.response else 'Pas de détails'}")
+            if hasattr(e, 'response') and e.response:
+                logger.error(f"Status code: {e.response.status_code}")
+                logger.error(f"Détails: {e.response.text}")
             return None
 
 class ClientSynchronizer:
+    """Classe pour synchroniser les clients entre Airtable et Sellsy."""
+    
     @staticmethod
     def sanitize_client_data(record_fields: Dict) -> Optional[Dict]:
-        """Nettoie et valide les données du client."""
+        """
+        Nettoie et valide les données du client avant l'envoi à Sellsy.
+        
+        Args:
+            record_fields: Champs de l'enregistrement Airtable
+            
+        Returns:
+            Données client formatées pour Sellsy ou None si données invalides
+        """
         required_fields = [
             'Nom', 'Prenom', 'Email', 'Téléphone', 
             'Adresse complète', 'Code postal', 'Ville'
@@ -210,52 +261,58 @@ class ClientSynchronizer:
             logger.warning(f"⚠️ Champs manquants ou vides : {', '.join(missing_fields)}")
             return None
         
-        # Préparation des données client selon la documentation Sellsy
-        # Format attendu par l'API pour Client.create
-        client_data = {
-            "name": f"{record_fields['Nom']} {record_fields['Prenom']}".strip(),
-            "type": "person",  # Type person car il s'agit d'un particulier
-            "email": str(record_fields["Email"]).strip(),
-            "tel": str(record_fields["Téléphone"]).strip(),
-        }
-        
-        # Préparation des données de contact
-        contact_data = {
-            "name": str(record_fields["Nom"]).strip(),
-            "forename": str(record_fields["Prenom"]).strip(),
-            "email": str(record_fields["Email"]).strip(),
-            "tel": str(record_fields["Téléphone"]).strip(),
-        }
-        
-        # Préparation des données d'adresse
-        address_data = {
-            "name": "Adresse principale",
-            "part1": str(record_fields["Adresse complète"]).strip(),
-            "zip": str(record_fields["Code postal"]).strip(),
-            "town": str(record_fields["Ville"]).strip(),
-            "countrycode": "FR"  # Par défaut France
-        }
+        # Nettoyage des données
+        nom = str(record_fields["Nom"]).strip()
+        prenom = str(record_fields["Prenom"]).strip()
+        email = str(record_fields["Email"]).strip()
+        telephone = str(record_fields["Téléphone"]).strip()
+        adresse = str(record_fields["Adresse complète"]).strip()
+        code_postal = str(record_fields["Code postal"]).strip()
+        ville = str(record_fields["Ville"]).strip()
         
         # Vérification du format de l'email
-        if "@" not in client_data["email"]:
-            logger.warning(f"⚠️ Format d'email invalide: {client_data['email']}")
+        if "@" not in email:
+            logger.warning(f"⚠️ Format d'email invalide: {email}")
             return None
         
-        logger.info(f"✅ Données client validées pour {contact_data['name']} {contact_data['forename']}")
-        
-        # Retourner les données formatées selon la structure attendue par l'API
-        return {
-            "third": client_data,
-            "contact": contact_data,
-            "address": address_data
+        # Préparation des données selon la structure de l'API Sellsy
+        client_data = {
+            "third": {
+                "name": f"{nom} {prenom}",
+                "type": "person",  # Type person car il s'agit d'un particulier
+                "email": email,
+                "tel": telephone,
+            },
+            "contact": {
+                "name": nom,
+                "forename": prenom,
+                "email": email,
+                "tel": telephone,
+            },
+            "address": {
+                "name": "Adresse principale",
+                "part1": adresse,
+                "zip": code_postal,
+                "town": ville,
+                "countrycode": "FR"  # Par défaut France
+            }
         }
+        
+        logger.info(f"✅ Données client validées pour {nom} {prenom}")
+        return client_data
 
     @staticmethod
     def synchronize_client(record: Dict):
-        """Synchronise un client d'Airtable vers Sellsy."""
+        """
+        Synchronise un client d'Airtable vers Sellsy.
+        
+        Args:
+            record: Enregistrement Airtable à synchroniser
+        """
         record_fields = record.get('fields', {})
         logger.info(f"🔄 Début de synchronisation pour l'enregistrement : {record['id']}")
         
+        # Préparation et validation des données
         formatted_data = ClientSynchronizer.sanitize_client_data(record_fields)
         
         if not formatted_data:
@@ -296,6 +353,30 @@ class ClientSynchronizer:
             logger.error(f"❌ Erreur lors de la synchronisation : {str(e)}")
             logger.exception("Détails de l'erreur:")
 
+def check_configuration():
+    """Vérifie que toute la configuration nécessaire est présente."""
+    missing_configs = []
+    
+    if not Config.AIRTABLE_API_KEY:
+        missing_configs.append("AIRTABLE_API_KEY")
+    if not Config.AIRTABLE_BASE_ID:
+        missing_configs.append("AIRTABLE_BASE_ID")
+    if not Config.AIRTABLE_TABLE_NAME:
+        missing_configs.append("AIRTABLE_TABLE_NAME")
+    if not Config.SELLSY_API_CONSUMER_TOKEN:
+        missing_configs.append("SELLSY_API_CONSUMER_TOKEN")
+    if not Config.SELLSY_API_CONSUMER_SECRET:
+        missing_configs.append("SELLSY_API_CONSUMER_SECRET")
+    if not Config.SELLSY_API_USER_TOKEN:
+        missing_configs.append("SELLSY_API_USER_TOKEN")
+    if not Config.SELLSY_API_USER_SECRET:
+        missing_configs.append("SELLSY_API_USER_SECRET")
+        
+    if missing_configs:
+        logger.error(f"❌ Configuration incomplète. Variables manquantes: {', '.join(missing_configs)}")
+        return False
+    return True
+
 def main():
     """Fonction principale de synchronisation."""
     logger.info("🚀 Démarrage de la synchronisation des clients")
@@ -303,25 +384,7 @@ def main():
     
     try:
         # Vérification des configurations
-        missing_configs = []
-        
-        if not Config.AIRTABLE_API_KEY:
-            missing_configs.append("AIRTABLE_API_KEY")
-        if not Config.AIRTABLE_BASE_ID:
-            missing_configs.append("AIRTABLE_BASE_ID")
-        if not Config.AIRTABLE_TABLE_NAME:
-            missing_configs.append("AIRTABLE_TABLE_NAME")
-        if not Config.SELLSY_API_CONSUMER_TOKEN:
-            missing_configs.append("SELLSY_API_CONSUMER_TOKEN")
-        if not Config.SELLSY_API_CONSUMER_SECRET:
-            missing_configs.append("SELLSY_API_CONSUMER_SECRET")
-        if not Config.SELLSY_API_USER_TOKEN:
-            missing_configs.append("SELLSY_API_USER_TOKEN")
-        if not Config.SELLSY_API_USER_SECRET:
-            missing_configs.append("SELLSY_API_USER_SECRET")
-            
-        if missing_configs:
-            logger.error(f"❌ Configuration incomplète. Variables manquantes: {', '.join(missing_configs)}")
+        if not check_configuration():
             return
             
         # Récupération de tous les enregistrements pour diagnostic
