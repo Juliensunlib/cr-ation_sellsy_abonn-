@@ -27,7 +27,9 @@ class AirtableAPI:
         offset = None
         
         while True:
-            params = {"offset": offset}
+            params = {}
+            if offset:
+                params["offset"] = offset
             
             # Ajout du filtre si spécifié
             if filter_formula:
@@ -36,7 +38,7 @@ class AirtableAPI:
             response = requests.get(
                 self.base_url, 
                 headers=self.headers, 
-                params={k: v for k, v in params.items() if v is not None}
+                params=params
             )
             
             response.raise_for_status()
