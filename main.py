@@ -245,8 +245,9 @@ def main():
         synchronizer = ClientSynchronizer()
         
         # Récupération des enregistrements à synchroniser
-        # Essayons différentes variantes possibles pour le nom du champ ID_Sellsy
-        possible_id_fields = ["ID_Sellsy", "Id_Sellsy", "id_sellsy", "ID Sellsy", "Id Sellsy", "id sellsy"]
+        # Liste plus complète de noms possibles pour le champ ID Sellsy
+        possible_id_fields = ["ID_Sellsy", "Id_Sellsy", "id_sellsy", "ID Sellsy", "Id Sellsy", 
+                             "id sellsy", "IDSellsy", "Sellsy ID", "sellsy_id", "sellsy-id"]
         
         # D'abord, récupérons un enregistrement pour examiner les noms de champs
         sample_records = synchronizer.airtable_api.get_records(None, 1)
@@ -267,23 +268,42 @@ def main():
             logger.warning("⚠️ Impossible de déterminer le champ ID Sellsy. Utilisation par défaut: 'ID_Sellsy'")
             sellsy_id_field = "ID_Sellsy"
         
-        # Maintenant, recherchons les enregistrements sans ID Sellsy
-        filter_formula = f"BLANK({{{sellsy_id_field}}})"
-        logger.info(f"🔍 Recherche des clients sans ID Sellsy avec la formule: {filter_formula}")
+        # Maintenant, récupérons tous les enregistrements pour filtrer côté client
+        # au lieu de faire confiance au filtrage Airtable qui peut être problématique
+        logger.info(f"🔍 Récupération de tous les enregistrements pour filtrage local")
         
         try:
-            # D'abord, récupérons tous les enregistrements pour voir combien il y en a
+            # Récupérons tous les enregistrements
             all_records = synchronizer.airtable_api.get_records()
             logger.info(f"📊 Nombre total d'enregistrements dans Airtable: {len(all_records)}")
             
-            # Puis, récupérons les enregistrements à synchroniser
-            records_to_sync = synchronizer.airtable_api.get_records(filter_formula)
+            # Filtrons côté client les enregistrements sans ID Sellsy
+            records_to_sync = []
+            empty_count = 0
             
-            logger.info(f"📝 Nombre d'enregistrements à synchroniser: {len(records_to_sync) if records_to_sync else 0}")
+            for record in all_records:
+                fields = record.get('fields', {})
+                
+                # Vérifier si le champ existe et n'est pas vide
+                if sellsy_id_field not in fields or fields.get(sellsy_id_field) is None:
+                    records_to_sync.append(record)
+                    empty_count += 1
+                    continue
+                
+                # Vérifier si le champ contient une valeur vide, des espaces ou "None"
+                id_value = str(fields.get(sellsy_id_field, "")).strip()
+                if id_value == "" or id_value.lower() == "none":
+                    records_to_sync.append(record)
+                    empty_count += 1
+                    # Log pour débug
+                    logger.debug(f"Enregistrement sans ID valide trouvé: {record['id']} - Valeur: '{id_value}'")
+            
+            logger.info(f"📝 Nombre d'enregistrements à synchroniser après filtrage local: {empty_count}")
             
             # Affichons les premiers enregistrements pour débogage
             if records_to_sync and len(records_to_sync) > 0:
-                logger.debug(f"Premier enregistrement à synchroniser: {json.dumps(records_to_sync[0].get('fields', {}))}")
+                for idx, record in enumerate(records_to_sync[:5]):  # Afficher les 5 premiers pour le debug
+                    logger.debug(f"Enregistrement #{idx+1} à synchroniser: {json.dumps({k: v for k, v in record.get('fields', {}).items() if k in ['Nom', 'Prenom', 'Email']})}")
                 
                 # Mise à jour de la fonction synchronize_client pour utiliser le bon champ
                 original_sync_client = synchronizer.synchronize_client
@@ -299,24 +319,24 @@ def main():
                         logger.error(f"❌ Erreur dans le wrapper de synchronisation: {str(e)}")
                 
                 # Remplacer temporairement la méthode
-                original_method = synchronizer.synchronize_client
                 synchronizer.synchronize_client = sync_client_wrapper
             
             if not records_to_sync:
                 logger.info("⏹️ Aucun client sans ID Sellsy à synchroniser.")
                 return
+                
+            logger.info(f"🔄 Synchronisation de {len(records_to_sync)} clients")
+            
+            # Synchronisation de chaque client
+            for record in records_to_sync:
+                synchronizer.synchronize_client(record)
+                # Pause légère entre les requêtes pour respecter les limites d'API
+                time.sleep(1)
+            
         except Exception as e:
             logger.error(f"❌ Erreur lors de la récupération des enregistrements: {str(e)}")
             logger.exception("Détails de l'erreur:")
             return
-        
-        logger.info(f"🔄 Synchronisation de {len(records_to_sync)} clients")
-        
-        # Synchronisation de chaque client
-        for record in records_to_sync:
-            synchronizer.synchronize_client(record)
-            # Pause légère entre les requêtes pour respecter les limites d'API
-            time.sleep(1)
         
         end_time = time.time()
         logger.info(f"✅ Synchronisation terminée en {end_time - start_time:.2f} secondes")
