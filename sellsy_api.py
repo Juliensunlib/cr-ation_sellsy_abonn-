@@ -80,6 +80,10 @@ class SellsyAPI:
             debug_data = data.copy()
             if 'oauth_signature' in debug_data:
                 debug_data['oauth_signature'] = '******'
+            if 'oauth_consumer_key' in debug_data:
+                debug_data['oauth_consumer_key'] = '***'
+            if 'oauth_token' in debug_data:
+                debug_data['oauth_token'] = '***'
             
             self.logger.debug(f"Requête API: URL={self.API_URL}")
             self.logger.debug(f"Données de requête: {debug_data}")
@@ -136,10 +140,8 @@ class SellsyAPI:
         timestamp = str(int(time.time()))
         
         # Création de la signature
-        # Pour PLAINTEXT, la signature doit être encodée en URL selon la spécification OAuth
-        consumer_secret_encoded = urllib.parse.quote(self.consumer_secret, safe='')
-        user_secret_encoded = urllib.parse.quote(self.user_secret, safe='')
-        signature = f"{consumer_secret_encoded}&{user_secret_encoded}"
+        # Correction: Pour Sellsy, la signature est simplement concaténée avec &, pas d'encodage URL ici
+        signature = f"{self.consumer_secret}&{self.user_secret}"
         
         # Paramètres OAuth
         oauth_params = {
