@@ -9,6 +9,7 @@ import os
 import json
 import requests
 import argparse
+import sys
 from dotenv import load_dotenv
 
 def setup_args():
@@ -33,6 +34,11 @@ def setup_args():
         "--update_env", 
         action="store_true",
         help="Mettre à jour le fichier .env avec les nouveaux tokens"
+    )
+    parser.add_argument(
+        "--ci_mode",
+        action="store_true",
+        help="Mode CI: écrit les tokens directement dans les variables d'environnement"
     )
     
     return parser.parse_args()
@@ -140,6 +146,32 @@ def update_env_file(env_file, access_token, refresh_token=None):
     
     print(f"✅ Fichier {env_file} mis à jour avec succès!")
 
+def set_github_env_vars(access_token, refresh_token=None):
+    """
+    Configure les variables d'environnement pour GitHub Actions.
+    
+    Args:
+        access_token: Token d'accès à définir
+        refresh_token: Token de rafraîchissement (optionnel)
+    """
+    print("🔄 Configuration des variables d'environnement GitHub Actions...")
+    
+    # Dans GitHub Actions, on utilise le fichier GITHUB_ENV pour définir des variables
+    github_env = os.environ.get('GITHUB_ENV')
+    
+    if github_env:
+        with open(github_env, 'a') as f:
+            f.write(f"SELLSY_ACCESS_TOKEN={access_token}\n")
+            if refresh_token:
+                f.write(f"SELLSY_REFRESH_TOKEN={refresh_token}\n")
+        print("✅ Variables d'environnement GitHub définies avec succès!")
+    else:
+        # Si nous ne sommes pas dans GitHub Actions, définir directement
+        os.environ["SELLSY_ACCESS_TOKEN"] = access_token
+        if refresh_token:
+            os.environ["SELLSY_REFRESH_TOKEN"] = refresh_token
+        print("✅ Variables d'environnement définies avec succès!")
+
 def main():
     """Fonction principale."""
     # Analyser les arguments
@@ -171,16 +203,21 @@ def main():
     
     # Afficher les instructions
     print("\n📋 Tokens d'accès:")
-    print(f"Access Token: {access_token}")
+    print(f"Access Token: {access_token[:10]}...")
     if refresh_token:
-        print(f"Refresh Token: {refresh_token}")
+        print(f"Refresh Token: {refresh_token[:10]}...")
     else:
         print("Note: Aucun refresh token n'a été fourni avec le flux client_credentials")
     
     # Mettre à jour le fichier .env si demandé
     if args.update_env:
         update_env_file(args.env_file, access_token, refresh_token)
-    else:
+    
+    # Définir les variables d'environnement pour GitHub Actions
+    if args.ci_mode or 'GITHUB_ACTIONS' in os.environ:
+        set_github_env_vars(access_token, refresh_token)
+    
+    if not args.update_env and not args.ci_mode and 'GITHUB_ACTIONS' not in os.environ:
         print("\n🔔 Pour utiliser ces tokens:")
         print(f"1. Ajoutez manuellement ces tokens à votre fichier {args.env_file}")
         print("2. Ou exécutez à nouveau ce script avec l'option --update_env")
