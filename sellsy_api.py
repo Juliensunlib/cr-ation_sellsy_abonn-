@@ -408,7 +408,7 @@ class SellsyAPI:
                     "civil": "mr" if contact.get("civility") == "man" else "mrs"
                 },
                 "addresses": [],
-                "type": "client"  # Ajout du champ 'type' manquant qui était la cause de l'erreur
+                "type": "client"  # Type du client (prospect/client)
             }
         else:
             # Format pour les entreprises (companies)
@@ -418,17 +418,21 @@ class SellsyAPI:
                 "phone_number": third.get("tel", ""),
                 "note": third.get("notes", ""),
                 "addresses": [],
-                "type": "client"  # Changement de "prospect" à "client" qui pourrait être valide
+                "type": "client"  # Type du client (prospect/client)
             }
         
         # Ajout de l'adresse si présente
         if address:
+            # FORMAT CORRIGÉ pour les adresses selon la doc API v2
             new_address = {
                 "name": address.get("name", "Adresse principale"),
-                "address": address.get("part1", ""),
+                "street": address.get("part1", ""),    # Changé de "address" à "street"
                 "zip_code": address.get("zip", ""),
                 "city": address.get("town", ""),
-                "country_code": address.get("countrycode", "FR")
+                "country": {
+                    "code": address.get("countrycode", "FR")  # Format correct pour le pays
+                },
+                "main": True  # Indique que c'est l'adresse principale
             }
             result["addresses"].append(new_address)
         
@@ -438,9 +442,11 @@ class SellsyAPI:
                 "first_name": contact.get("firstname", ""),
                 "last_name": contact.get("name", ""),
                 "email": contact.get("email", ""),
-                "phone_number": contact.get("tel", "")
+                "phone_number": contact.get("tel", ""),
+                "position": contact.get("position", "")  # Ajout du poste du contact
             }]
         
+        self.logger.debug(f"Données client formatées : {result}")
         return result
     
     def get_client(self, client_id: str, is_individual: bool = False) -> Optional[Dict]:
