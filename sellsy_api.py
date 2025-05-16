@@ -407,7 +407,6 @@ class SellsyAPI:
                 "civil": {
                     "civil": "mr" if contact.get("civility") == "man" else "mrs"
                 },
-                "addresses": [],
                 "type": "client"  # Type du client (prospect/client)
             }
         else:
@@ -417,24 +416,26 @@ class SellsyAPI:
                 "email": third.get("email", ""),
                 "phone_number": third.get("tel", ""),
                 "note": third.get("notes", ""),
-                "addresses": [],
                 "type": "client"  # Type du client (prospect/client)
             }
         
         # Ajout de l'adresse si présente
         if address:
-            # FORMAT CORRIGÉ pour les adresses selon la doc API v2
-            new_address = {
+            # Formatage correct pour les adresses selon la doc API v2
+            address_data = {
                 "name": address.get("name", "Adresse principale"),
-                "street": address.get("part1", ""),    # Changé de "address" à "street"
-                "zip_code": address.get("zip", ""),
+                "address_line_1": address.get("part1", ""),
+                "address_line_2": address.get("part2", ""),
+                "postal_code": address.get("zip", ""),
                 "city": address.get("town", ""),
                 "country": {
-                    "code": address.get("countrycode", "FR")  # Format correct pour le pays
+                    "code": address.get("countrycode", "FR")
                 },
-                "main": True  # Indique que c'est l'adresse principale
+                "is_invoicing_address": True,
+                "is_delivery_address": True,
+                "is_main": True
             }
-            result["addresses"].append(new_address)
+            result["addresses"] = [address_data]
         
         # Ajout du contact pour les entreprises
         if not is_individual and contact:
@@ -443,7 +444,10 @@ class SellsyAPI:
                 "last_name": contact.get("name", ""),
                 "email": contact.get("email", ""),
                 "phone_number": contact.get("tel", ""),
-                "position": contact.get("position", "")  # Ajout du poste du contact
+                "position": contact.get("position", ""),
+                "civil": {
+                    "civil": "mr" if contact.get("civility") == "man" else "mrs"
+                }
             }]
         
         self.logger.debug(f"Données client formatées : {result}")
