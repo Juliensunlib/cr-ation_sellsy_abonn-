@@ -350,12 +350,13 @@ class SellsyAPI:
         self.logger.info("🔄 Création d'un nouveau client dans Sellsy v2")
         
         try:
-            # Conversion du format des données pour l'API v2
-            v2_client_data = self._prepare_client_data_for_v2(client_data)
-            
-            # API v2 utilise différents endpoints pour individus et entreprises
+            # Déterminer le type de client (particulier ou entreprise)
             is_individual = client_data.get("third", {}).get("type") == "person"
             
+            # Conversion du format des données pour l'API v2
+            v2_client_data = self._prepare_client_data_for_v2(client_data, is_individual)
+            
+            # API v2 utilise différents endpoints pour individus et entreprises
             if is_individual:
                 endpoint = "/individuals"
             else:
@@ -369,7 +370,13 @@ class SellsyAPI:
                 # Extraction de l'ID client de la réponse
                 client_id = response.get("id")
                 self.logger.info(f"✅ Client créé avec succès! ID: {client_id}")
-                return {"status": "success", "response": client_id}
+                
+                # Si des adresses ont été fournies mais n'ont pas été incluses dans la création initiale
+                # (par exemple pour les entreprises où les adresses doivent être ajoutées séparément)
+                if client_id and "addresses" in v2_client_data and not is_individual:
+                    self._create_client_addresses(client_id, v2_client_data["addresses"], is_individual)
+                
+                return {"status": "success", "client_id": client_id, "response": response}
             else:
                 self.logger.error("❌ Échec de création du client")
                 return {"status": "error", "error": "Échec de création du client"}
@@ -379,12 +386,44 @@ class SellsyAPI:
             self.logger.exception("Détails:")
             return {"status": "error", "error": str(e)}
     
-    def _prepare_client_data_for_v2(self, old_data: Dict) -> Dict:
+    def _create_client_addresses(self, client_id: str, addresses: List[Dict], is_individual: bool = False) -> bool:
+        """
+        Crée des adresses pour un client existant.
+        
+        Args:
+            client_id: ID du client
+            addresses: Liste des adresses à créer
+            is_individual: True si le client est un particulier, False sinon
+            
+        Returns:
+            True si la création a réussi, False sinon
+        """
+        if not addresses:
+            return True
+        
+        entity_type = "individuals" if is_individual else "companies"
+        endpoint = f"/{entity_type}/{client_id}/addresses"
+        
+        for address in addresses:
+            try:
+                response = self.request_api("POST", endpoint, address)
+                if not response:
+                    self.logger.error(f"❌ Échec de création d'adresse pour le client {client_id}")
+                    return False
+                self.logger.info(f"✅ Adresse créée avec succès pour le client {client_id}")
+            except Exception as e:
+                self.logger.error(f"❌ Erreur lors de la création d'adresse: {str(e)}")
+                return False
+        
+        return True
+    
+    def _prepare_client_data_for_v2(self, old_data: Dict, is_individual: bool) -> Dict:
         """
         Convertit les données client du format v1 au format v2 attendu par l'API.
         
         Args:
             old_data: Données client au format v1
+            is_individual: True si le client est un particulier, False sinon
             
         Returns:
             Données client au format v2
@@ -394,9 +433,7 @@ class SellsyAPI:
         contact = old_data.get("contact", {})
         address = old_data.get("address", {})
         
-        # Déterminer si c'est un particulier ou une entreprise
-        is_individual = third.get("type") == "person"
-        
+        # Formatage en fonction du type de client
         if is_individual:
             # Format pour les particuliers (individuals)
             result = {
@@ -409,6 +446,12 @@ class SellsyAPI:
                 },
                 "type": "client"  # Type du client (prospect/client)
             }
+            
+            # Pour les particuliers, les adresses sont incluses directement
+            if address:
+                address_data = self._format_address_for_v2(address)
+                result["addresses"] = [address_data]
+                
         else:
             # Format pour les entreprises (companies)
             result = {
@@ -418,40 +461,53 @@ class SellsyAPI:
                 "note": third.get("notes", ""),
                 "type": "client"  # Type du client (prospect/client)
             }
-        
-        # Ajout de l'adresse si présente
-        if address:
-            # Formatage correct pour les adresses selon la doc API v2
-            address_data = {
-                "name": address.get("name", "Adresse principale"),
-                "address_line_1": address.get("part1", ""),
-                "address_line_2": address.get("part2", ""),
-                "postal_code": address.get("zip", ""),
-                "city": address.get("town", ""),
-                "country": {
-                    "code": address.get("countrycode", "FR")
-                },
-                "is_invoicing_address": True,
-                "is_delivery_address": True,
-                "is_main": True
-            }
-            result["addresses"] = [address_data]
-        
-        # Ajout du contact pour les entreprises
-        if not is_individual and contact:
-            result["contacts"] = [{
-                "first_name": contact.get("firstname", ""),
-                "last_name": contact.get("name", ""),
-                "email": contact.get("email", ""),
-                "phone_number": contact.get("tel", ""),
-                "position": contact.get("position", ""),
-                "civil": {
-                    "civil": "mr" if contact.get("civility") == "man" else "mrs"
+            
+            # Pour les entreprises, on prépare les adresses mais elles seront ajoutées séparément après la création
+            if address:
+                address_data = self._format_address_for_v2(address)
+                result["addresses"] = [address_data]
+            
+            # Ajout du contact pour les entreprises
+            if contact:
+                contact_data = {
+                    "first_name": contact.get("firstname", ""),
+                    "last_name": contact.get("name", ""),
+                    "email": contact.get("email", ""),
+                    "phone_number": contact.get("tel", ""),
+                    "mobile_number": contact.get("mobile", ""),
+                    "position": contact.get("position", ""),
+                    "civil": {
+                        "civil": "mr" if contact.get("civility") == "man" else "mrs"
+                    }
                 }
-            }]
+                result["contacts"] = [contact_data]
         
-        self.logger.debug(f"Données client formatées : {result}")
+        self.logger.debug(f"Données client formatées pour v2: {result}")
         return result
+    
+    def _format_address_for_v2(self, address: Dict) -> Dict:
+        """
+        Formate une adresse selon le format attendu par l'API v2.
+        
+        Args:
+            address: Données d'adresse au format v1
+            
+        Returns:
+            Données d'adresse au format v2
+        """
+        return {
+            "name": address.get("name", "Adresse principale"),
+            "address_line_1": address.get("part1", ""),
+            "address_line_2": address.get("part2", ""),
+            "postal_code": address.get("zip", ""),
+            "city": address.get("town", ""),
+            "country": {
+                "code": address.get("countrycode", "FR")
+            },
+            "is_invoicing_address": True,
+            "is_delivery_address": True,
+            "is_main": True
+        }
     
     def get_client(self, client_id: str, is_individual: bool = False) -> Optional[Dict]:
         """
@@ -469,13 +525,45 @@ class SellsyAPI:
         
         return self.request_api("GET", endpoint)
     
-    def search_clients(self, search_term=None, limit=100) -> Optional[Dict]:
+    def update_client(self, client_id: str, client_data: Dict, is_individual: bool = False) -> Optional[Dict]:
+        """
+        Met à jour un client existant dans Sellsy.
+        
+        Args:
+            client_id: ID du client à mettre à jour
+            client_data: Nouvelles données du client
+            is_individual: True si le client est un particulier, False sinon
+            
+        Returns:
+            Réponse de l'API ou None en cas d'erreur
+        """
+        self.logger.info(f"🔄 Mise à jour du client ID: {client_id}")
+        
+        # Conversion du format des données pour l'API v2
+        v2_client_data = self._prepare_client_data_for_v2(client_data, is_individual)
+        
+        # Déterminer l'endpoint en fonction du type de client
+        endpoint = f"/individuals/{client_id}" if is_individual else f"/companies/{client_id}"
+        
+        # Exécuter la requête
+        response = self.request_api("PUT", endpoint, v2_client_data)
+        
+        if response:
+            self.logger.info(f"✅ Client mis à jour avec succès!")
+            return {"status": "success", "response": response}
+        else:
+            self.logger.error("❌ Échec de mise à jour du client")
+            return {"status": "error", "error": "Échec de mise à jour du client"}
+    
+    def search_clients(self, search_term=None, limit=100, offset=0, type_filter=None) -> Optional[Dict]:
         """
         Recherche des clients dans Sellsy.
         
         Args:
             search_term: Terme de recherche (facultatif)
             limit: Nombre maximum de résultats à retourner
+            offset: Position de départ pour la pagination
+            type_filter: Filtrer par type (client, prospect, etc.)
             
         Returns:
             Liste des clients ou None en cas d'erreur
@@ -485,11 +573,14 @@ class SellsyAPI:
         # Paramètres de recherche
         params = {
             "limit": limit,
-            "offset": 0
+            "offset": offset
         }
         
         if search_term:
             params["search"] = search_term
+            
+        if type_filter:
+            params["type"] = type_filter
         
         # Recherche dans les entreprises et particuliers
         companies = self.request_api("GET", "/companies", params=params) or {"data": []}
@@ -497,7 +588,56 @@ class SellsyAPI:
         
         # Combiner les résultats
         results = []
-        results.extend(companies.get("data", []))
-        results.extend(individuals.get("data", []))
         
-        return {"data": results[:limit]}
+        if "data" in companies:
+            for company in companies.get("data", []):
+                company["client_type"] = "company"
+                results.append(company)
+                
+        if "data" in individuals:
+            for individual in individuals.get("data", []):
+                individual["client_type"] = "individual"
+                results.append(individual)
+        
+        # Trier et limiter les résultats
+        results = results[:limit]
+        
+        return {"data": results, "total_count": len(results)}
+    
+    def create_address(self, client_id: str, address_data: Dict, is_individual: bool = False) -> Optional[Dict]:
+        """
+        Crée une adresse pour un client existant.
+        
+        Args:
+            client_id: ID du client
+            address_data: Données de l'adresse à créer
+            is_individual: True si le client est un particulier, False sinon
+            
+        Returns:
+            Réponse de l'API ou None en cas d'erreur
+        """
+        entity_type = "individuals" if is_individual else "companies"
+        endpoint = f"/{entity_type}/{client_id}/addresses"
+        
+        # Formatage de l'adresse pour l'API v2
+        v2_address_data = self._format_address_for_v2(address_data)
+        
+        self.logger.info(f"🔄 Création d'une adresse pour le client ID: {client_id}")
+        return self.request_api("POST", endpoint, v2_address_data)
+    
+    def get_client_addresses(self, client_id: str, is_individual: bool = False) -> Optional[Dict]:
+        """
+        Récupère les adresses d'un client.
+        
+        Args:
+            client_id: ID du client
+            is_individual: True si le client est un particulier, False sinon
+            
+        Returns:
+            Liste des adresses ou None en cas d'erreur
+        """
+        entity_type = "individuals" if is_individual else "companies"
+        endpoint = f"/{entity_type}/{client_id}/addresses"
+        
+        self.logger.info(f"🔄 Récupération des adresses du client ID: {client_id}")
+        return self.request_api("GET", endpoint)
