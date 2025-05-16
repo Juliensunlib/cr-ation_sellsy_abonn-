@@ -165,10 +165,12 @@ class ClientSynchronizer:
             },
             "address": {
                 "name": "Adresse principale",
-                "part1": adresse,
+                "street": adresse,  # Modifié de "part1" à "street" pour correspondre au format de l'API v2
                 "zip": code_postal,
                 "town": ville,
-                "countrycode": "FR"  # Par défaut France
+                "country": {  # Format actualisé du pays selon l'API v2
+                    "code": "FR"  # Par défaut France
+                }
             }
         }
         
