@@ -143,6 +143,14 @@ class ClientSynchronizer:
         code_postal = str(record_fields["Code postal"]).strip()
         ville = str(record_fields["Ville"]).strip()
         
+        # Récupération du champ pays s'il existe, sinon "FR" par défaut
+        pays_code = str(record_fields.get("Pays", "FR")).strip()
+        if pays_code == "":
+            pays_code = "FR"
+        
+        # Récupération de l'adresse ligne 2 si elle existe
+        adresse_ligne_2 = str(record_fields.get("Adresse ligne 2", "")).strip()
+        
         # Vérification du format de l'email
         if "@" not in email:
             logger.warning(f"⚠️ Format d'email invalide: {email}")
@@ -165,14 +173,28 @@ class ClientSynchronizer:
             },
             "address": {
                 "name": "Adresse principale",
-                "street": adresse,  # Modifié de "part1" à "street" pour correspondre au format de l'API v2
-                "zip": code_postal,
-                "town": ville,
-                "country": {  # Format actualisé du pays selon l'API v2
-                    "code": "FR"  # Par défaut France
-                }
+                "address_line_1": adresse,
+                "address_line_2": adresse_ligne_2,
+                "postal_code": code_postal,
+                "city": ville,
+                "country": {
+                    "code": pays_code
+                },
+                "is_invoicing_address": True,
+                "is_delivery_address": True,
+                "is_main": True
             }
         }
+        
+        # Vérification si c'est une entreprise (société)
+        societe = str(record_fields.get("Société", "")).strip()
+        if societe:
+            client_data["third"]["type"] = "corporation"
+            client_data["third"]["name"] = societe
+            # Ajout du numéro SIRET si disponible
+            siret = str(record_fields.get("SIRET", "")).strip()
+            if siret:
+                client_data["third"]["siret"] = siret
         
         logger.info(f"✅ Données client validées pour {prenom} {nom}")
         return client_data
