@@ -247,7 +247,8 @@ class ClientSynchronizer:
                         logger.warning(f"⚠️ Échec de création d'adresse pour le client ID: {client_id}")
                     
                     # Stocker le résultat pour le wrapper
-                    self.sync_result = {"id": client_id}
+                    # Assurons-nous de stocker uniquement l'ID comme chaîne
+                    self.sync_result = {"id": str(client_id)}
                 else:
                     logger.error(f"❌ Impossible de trouver l'ID client dans la réponse: {response}")
             else:
@@ -414,11 +415,13 @@ def main():
                         
                         # Si la synchronisation réussit, mettre à jour le champ ID Sellsy
                         if hasattr(synchronizer, 'sync_result') and synchronizer.sync_result:
-                            client_id = synchronizer.sync_result.get('id')
+                            # Extraction de l'ID client comme chaîne simple
+                            client_id = str(synchronizer.sync_result.get('id'))
                             if client_id:
+                                # Mise à jour du champ ID Sellsy dans Airtable avec une simple chaîne
                                 update_result = synchronizer.airtable_api.update_record(
                                     record['id'], 
-                                    {sellsy_id_field: str(client_id)}
+                                    {sellsy_id_field: client_id}
                                 )
                                 
                                 if update_result:
