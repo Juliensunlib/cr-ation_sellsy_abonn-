@@ -376,7 +376,7 @@ class SellsyAPI:
                 if client_id and "addresses" in v2_client_data and not is_individual:
                     self._create_client_addresses(client_id, v2_client_data["addresses"], is_individual)
                 
-                return {"status": "success", "client_id": client_id, "response": response}
+                return {"status": "success", "client_id": client_id, "response": client_id}
             else:
                 self.logger.error("❌ Échec de création du client")
                 return {"status": "error", "error": "Échec de création du client"}
@@ -447,10 +447,16 @@ class SellsyAPI:
                 "type": "client"  # Type du client (prospect/client)
             }
             
-            # Pour les particuliers, les adresses sont incluses directement
+            # Pour les particuliers, les adresses sont incluses directement dans la requête
             if address:
-                address_data = self._format_address_for_v2(address)
-                result["addresses"] = [address_data]
+                result["address"] = {
+                    "name": address.get("name", "Adresse principale"),
+                    "address": address.get("address_line_1", ""),
+                    "addressComplement": address.get("address_line_2", ""),
+                    "zipcode": address.get("postal_code", ""),
+                    "city": address.get("city", ""),
+                    "country": address.get("country", {}).get("code", "FR")
+                }
                 
         else:
             # Format pour les entreprises (companies)
@@ -462,10 +468,26 @@ class SellsyAPI:
                 "type": "client"  # Type du client (prospect/client)
             }
             
+            # SIRET si disponible
+            if "siret" in third and third["siret"]:
+                result["siret"] = third["siret"]
+            
             # Pour les entreprises, on prépare les adresses mais elles seront ajoutées séparément après la création
             if address:
-                address_data = self._format_address_for_v2(address)
-                result["addresses"] = [address_data]
+                addresses = []
+                address_data = {
+                    "name": address.get("name", "Adresse principale"),
+                    "address": address.get("address_line_1", ""),
+                    "addressComplement": address.get("address_line_2", ""),
+                    "zipcode": address.get("postal_code", ""),
+                    "city": address.get("city", ""),
+                    "country": address.get("country", {}).get("code", "FR"),
+                    "isMain": True,
+                    "isInvoicing": True,
+                    "isDelivery": True
+                }
+                addresses.append(address_data)
+                result["addresses"] = addresses
             
             # Ajout du contact pour les entreprises
             if contact:
@@ -497,16 +519,14 @@ class SellsyAPI:
         """
         return {
             "name": address.get("name", "Adresse principale"),
-            "address_line_1": address.get("part1", ""),
-            "address_line_2": address.get("part2", ""),
-            "postal_code": address.get("zip", ""),
-            "city": address.get("town", ""),
-            "country": {
-                "code": address.get("countrycode", "FR")
-            },
-            "is_invoicing_address": True,
-            "is_delivery_address": True,
-            "is_main": True
+            "address": address.get("address_line_1", ""),
+            "addressComplement": address.get("address_line_2", ""),
+            "zipcode": address.get("postal_code", ""),
+            "city": address.get("city", ""),
+            "country": address.get("country", {}).get("code", "FR"),
+            "isMain": True,
+            "isInvoicing": True,
+            "isDelivery": True
         }
     
     def get_client(self, client_id: str, is_individual: bool = False) -> Optional[Dict]:
