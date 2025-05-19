@@ -222,30 +222,78 @@ class ClientSynchronizer:
             return
         
         try:
+            # Déterminer si le client est un individu ou une entreprise
+            is_individual = formatted_data["third"]["type"] == "person"
+            
+            # Extraire les données d'adresse avant la création du client
+            address_data = formatted_data.get("address", {})
+            
             # Création du client dans Sellsy
             response = self.sellsy_api.create_client(formatted_data)
 
-            if response:
-                # Vérification de la réponse
-                if response.get("status") == "success":
-                    # Dans l'API Sellsy v2, l'ID client est dans le champ response
-                    client_id = response.get("response")
+            if response and response.get("status") == "success":
+                # Dans l'API Sellsy v2, l'ID client est dans le champ response
+                client_id = response.get("client_id") or response.get("response")
+                
+                if client_id:
+                    logger.info(f"✅ Client créé avec succès dans Sellsy. ID: {client_id}")
                     
-                    if client_id:
-                        logger.info(f"✅ Client créé avec succès dans Sellsy. ID: {client_id}")
-                        # Stocker le résultat pour le wrapper
-                        self.sync_result = {"id": client_id}
+                    # Créer explicitement l'adresse pour tous les clients, qu'ils soient individus ou entreprises
+                    # (Cela résout le problème des adresses non synchronisées)
+                    address_result = self.create_address_for_client(client_id, address_data, is_individual)
+                    if address_result:
+                        logger.info(f"✅ Adresse créée avec succès pour le client ID: {client_id}")
                     else:
-                        logger.error(f"❌ Impossible de trouver l'ID client dans la réponse: {response}")
+                        logger.warning(f"⚠️ Échec de création d'adresse pour le client ID: {client_id}")
+                    
+                    # Stocker le résultat pour le wrapper
+                    self.sync_result = {"id": client_id}
                 else:
-                    error_msg = response.get("error", "Réponse inconnue")
-                    logger.error(f"🚨 Échec de la synchronisation du client: {error_msg}")
+                    logger.error(f"❌ Impossible de trouver l'ID client dans la réponse: {response}")
             else:
-                logger.error("🚨 Pas de réponse valide de l'API Sellsy")
+                error_msg = response.get("error", "Réponse inconnue") if response else "Pas de réponse"
+                logger.error(f"🚨 Échec de la synchronisation du client: {error_msg}")
         
         except Exception as e:
             logger.error(f"❌ Erreur lors de la synchronisation : {str(e)}")
             logger.exception("Détails de l'erreur:")
+    
+    def create_address_for_client(self, client_id: str, address_data: Dict, is_individual: bool) -> bool:
+        """
+        Crée une adresse pour un client dans Sellsy.
+        
+        Args:
+            client_id: ID du client dans Sellsy
+            address_data: Données de l'adresse
+            is_individual: True si le client est un particulier, False sinon
+            
+        Returns:
+            True si la création a réussi, False sinon
+        """
+        try:
+            # Formater l'adresse pour l'API Sellsy v2
+            formatted_address = {
+                "name": address_data.get("name", "Adresse principale"),
+                "address": address_data.get("address_line_1", ""),
+                "addressComplement": address_data.get("address_line_2", ""),
+                "zipcode": address_data.get("postal_code", ""),
+                "city": address_data.get("city", ""),
+                "country": address_data.get("country", {}).get("code", "FR"),
+                "isMain": True,
+                "isInvoicing": True,
+                "isDelivery": True
+            }
+            
+            logger.debug(f"Création d'adresse pour client {client_id}: {formatted_address}")
+            
+            # Créer l'adresse via l'API Sellsy
+            result = self.sellsy_api.create_address(client_id, formatted_address, is_individual)
+            
+            return result is not None
+            
+        except Exception as e:
+            logger.error(f"❌ Erreur lors de la création de l'adresse: {str(e)}")
+            return False
 
 def check_configuration() -> bool:
     """
