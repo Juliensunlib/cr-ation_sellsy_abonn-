@@ -418,112 +418,94 @@ class SellsyAPI:
         return True
     
     def _prepare_client_data_for_v2(self, old_data: Dict, is_individual: bool) -> Dict:
-    """
-    Convertit les données client du format v1 au format v2 attendu par l'API.
-    
-    Args:
-        old_data: Données client au format v1
-        is_individual: True si le client est un particulier, False sinon
+        """
+        Convertit les données client du format v1 au format v2 attendu par l'API.
         
-    Returns:
-        Données client au format v2
-    """
-    # Extraction des données de l'ancien format
-    third = old_data.get("third", {})
-    contact = old_data.get("contact", {})
-    address = old_data.get("address", {})
-    custom_fields = old_data.get("custom_fields", {})  # NOUVEAU : récupération des champs personnalisés
-    
-    # Formatage en fonction du type de client
-    if is_individual:
-        # Format pour les particuliers (individuals)
-        result = {
-            "first_name": contact.get("firstname", ""),
-            "last_name": contact.get("name", ""),
-            "email": contact.get("email", ""),
-            "phone_number": contact.get("tel", ""),
-            "civil": {
-                "civil": "mr" if contact.get("civility") == "man" else "mrs"
-            },
-            "type": "client"  # Type du client (prospect/client)
-        }
-        
-        # NOUVEAU : Ajout des champs personnalisés pour les particuliers
-        if custom_fields.get("installateur"):
-            result["custom_fields"] = {
-                "installateur": custom_fields["installateur"]
-            }
-        
-        # Pour les particuliers, les adresses sont incluses directement dans la requête
-        if address:
-            result["address"] = {
-                "name": address.get("name", "Adresse principale"),
-                "address": address.get("address_line_1", ""),
-                "addressComplement": address.get("address_line_2", ""),
-                "zipcode": address.get("postal_code", ""),
-                "city": address.get("city", ""),
-                "country": address.get("country", {}).get("code", "FR")
-            }
+        Args:
+            old_data: Données client au format v1
+            is_individual: True si le client est un particulier, False sinon
             
-    else:
-        # Format pour les entreprises (companies)
-        result = {
-            "name": third.get("name", ""),
-            "email": third.get("email", ""),
-            "phone_number": third.get("tel", ""),
-            "note": third.get("notes", ""),
-            "type": "client"  # Type du client (prospect/client)
-        }
+        Returns:
+            Données client au format v2
+        """
+        # Extraction des données de l'ancien format
+        third = old_data.get("third", {})
+        contact = old_data.get("contact", {})
+        address = old_data.get("address", {})
         
-        # NOUVEAU : Ajout des champs personnalisés pour les entreprises
-        if custom_fields.get("installateur"):
-            result["custom_fields"] = {
-                "installateur": custom_fields["installateur"]
-            }
-        
-        # SIRET si disponible
-        if "siret" in third and third["siret"]:
-            result["siret"] = third["siret"]
-        
-        # Pour les entreprises, on prépare les adresses mais elles seront ajoutées séparément après la création
-        if address:
-            addresses = []
-            address_data = {
-                "name": address.get("name", "Adresse principale"),
-                "address": address.get("address_line_1", ""),
-                "addressComplement": address.get("address_line_2", ""),
-                "zipcode": address.get("postal_code", ""),
-                "city": address.get("city", ""),
-                "country": address.get("country", {}).get("code", "FR"),
-                "isMain": True,
-                "isInvoicing": True,
-                "isDelivery": True
-            }
-            addresses.append(address_data)
-            result["addresses"] = addresses
-        
-        # Ajout du contact pour les entreprises
-        if contact:
-            contact_data = {
+        # Formatage en fonction du type de client
+        if is_individual:
+            # Format pour les particuliers (individuals)
+            result = {
                 "first_name": contact.get("firstname", ""),
                 "last_name": contact.get("name", ""),
                 "email": contact.get("email", ""),
                 "phone_number": contact.get("tel", ""),
-                "mobile_number": contact.get("mobile", ""),
-                "position": contact.get("position", ""),
                 "civil": {
                     "civil": "mr" if contact.get("civility") == "man" else "mrs"
-                }
+                },
+                "type": "client"  # Type du client (prospect/client)
             }
-            result["contacts"] = [contact_data]
-    
-    self.logger.debug(f"Données client formatées pour v2: {result}")
-    
-    # NOUVEAU : Log des champs personnalisés pour le débogage
-    if custom_fields.get("installateur"):
-        self.logger.info(f"📋 Champ personnalisé installateur ajouté : {custom_fields['installateur']}")
-    
-    return result
+            
+            # Pour les particuliers, les adresses sont incluses directement dans la requête
+            if address:
+                result["address"] = {
+                    "name": address.get("name", "Adresse principale"),
+                    "address": address.get("address_line_1", ""),
+                    "addressComplement": address.get("address_line_2", ""),
+                    "zipcode": address.get("postal_code", ""),
+                    "city": address.get("city", ""),
+                    "country": address.get("country", {}).get("code", "FR")
+                }
+                
+        else:
+            # Format pour les entreprises (companies)
+            result = {
+                "name": third.get("name", ""),
+                "email": third.get("email", ""),
+                "phone_number": third.get("tel", ""),
+                "note": third.get("notes", ""),
+                "type": "client"  # Type du client (prospect/client)
+            }
+            
+            # SIRET si disponible
+            if "siret" in third and third["siret"]:
+                result["siret"] = third["siret"]
+            
+            # Pour les entreprises, on prépare les adresses mais elles seront ajoutées séparément après la création
+            if address:
+                addresses = []
+                address_data = {
+                    "name": address.get("name", "Adresse principale"),
+                    "address": address.get("address_line_1", ""),
+                    "addressComplement": address.get("address_line_2", ""),
+                    "zipcode": address.get("postal_code", ""),
+                    "city": address.get("city", ""),
+                    "country": address.get("country", {}).get("code", "FR"),
+                    "isMain": True,
+                    "isInvoicing": True,
+                    "isDelivery": True
+                }
+                addresses.append(address_data)
+                result["addresses"] = addresses
+            
+            # Ajout du contact pour les entreprises
+            if contact:
+                contact_data = {
+                    "first_name": contact.get("firstname", ""),
+                    "last_name": contact.get("name", ""),
+                    "email": contact.get("email", ""),
+                    "phone_number": contact.get("tel", ""),
+                    "mobile_number": contact.get("mobile", ""),
+                    "position": contact.get("position", ""),
+                    "civil": {
+                        "civil": "mr" if contact.get("civility") == "man" else "mrs"
+                    }
+                }
+                result["contacts"] = [contact_data]
+        
+        self.logger.debug(f"Données client formatées pour v2: {result}")
+        return result
     
     def _format_address_for_v2(self, address: Dict) -> Dict:
         """
