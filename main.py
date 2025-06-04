@@ -109,107 +109,95 @@ class ClientSynchronizer:
         logger.info("🔄 Test de connexion à l'API Sellsy V2...")
         return self.sellsy_api.test_authentication()
     
-    # Modifications à apporter dans main.py
-
-def sanitize_client_data(self, record_fields: Dict) -> Optional[Dict]:
-    """
-    Nettoie et valide les données du client avant l'envoi à Sellsy.
-    
-    Args:
-        record_fields: Champs de l'enregistrement Airtable
+    def sanitize_client_data(self, record_fields: Dict) -> Optional[Dict]:
+        """
+        Nettoie et valide les données du client avant l'envoi à Sellsy.
         
-    Returns:
-        Données client formatées pour Sellsy ou None si données invalides
-    """
-    required_fields = [
-        'Nom', 'Prenom', 'Email', 'Téléphone', 
-        'Adresse complète', 'Code postal', 'Ville'
-    ]
-    
-    # Vérifie que tous les champs requis sont présents et non vides
-    missing_fields = []
-    for field in required_fields:
-        if field not in record_fields or not record_fields[field]:
-            missing_fields.append(field)
-    
-    if missing_fields:
-        logger.warning(f"⚠️ Champs manquants ou vides : {', '.join(missing_fields)}")
-        return None
-    
-    # Nettoyage des données
-    nom = str(record_fields["Nom"]).strip()
-    prenom = str(record_fields["Prenom"]).strip()
-    email = str(record_fields["Email"]).strip()
-    telephone = str(record_fields["Téléphone"]).strip()
-    adresse = str(record_fields["Adresse complète"]).strip()
-    code_postal = str(record_fields["Code postal"]).strip()
-    ville = str(record_fields["Ville"]).strip()
-    
-    # Récupération du champ pays s'il existe, sinon "FR" par défaut
-    pays_code = str(record_fields.get("Pays", "FR")).strip()
-    if pays_code == "":
-        pays_code = "FR"
-    
-    # Récupération de l'adresse ligne 2 si elle existe
-    adresse_ligne_2 = str(record_fields.get("Adresse ligne 2", "")).strip()
-    
-    # NOUVEAU : Récupération du nom de l'entreprise installateur
-    nom_entreprise_installateur = str(record_fields.get("Nom de l'entreprise (from Installateur)", "")).strip()
-    
-    # Vérification du format de l'email
-    if "@" not in email:
-        logger.warning(f"⚠️ Format d'email invalide: {email}")
-        return None
-    
-    # Format pour l'API Sellsy V2 - par défaut on considère un individu (particulier)
-    client_data = {
-        "third": {
-            "name": f"{prenom} {nom}",
-            "email": email,
-            "tel": telephone,
-            "type": "person"  # Personne physique par défaut
-        },
-        "contact": {
-            "name": nom,
-            "firstname": prenom,
-            "email": email,
-            "tel": telephone,
-            "position": "Client"
-        },
-        "address": {
-            "name": "Adresse principale",
-            "address_line_1": adresse,
-            "address_line_2": adresse_ligne_2,
-            "postal_code": code_postal,
-            "city": ville,
-            "country": {
-                "code": pays_code
+        Args:
+            record_fields: Champs de l'enregistrement Airtable
+            
+        Returns:
+            Données client formatées pour Sellsy ou None si données invalides
+        """
+        required_fields = [
+            'Nom', 'Prenom', 'Email', 'Téléphone', 
+            'Adresse complète', 'Code postal', 'Ville'
+        ]
+        
+        # Vérifie que tous les champs requis sont présents et non vides
+        missing_fields = []
+        for field in required_fields:
+            if field not in record_fields or not record_fields[field]:
+                missing_fields.append(field)
+        
+        if missing_fields:
+            logger.warning(f"⚠️ Champs manquants ou vides : {', '.join(missing_fields)}")
+            return None
+        
+        # Nettoyage des données
+        nom = str(record_fields["Nom"]).strip()
+        prenom = str(record_fields["Prenom"]).strip()
+        email = str(record_fields["Email"]).strip()
+        telephone = str(record_fields["Téléphone"]).strip()
+        adresse = str(record_fields["Adresse complète"]).strip()
+        code_postal = str(record_fields["Code postal"]).strip()
+        ville = str(record_fields["Ville"]).strip()
+        
+        # Récupération du champ pays s'il existe, sinon "FR" par défaut
+        pays_code = str(record_fields.get("Pays", "FR")).strip()
+        if pays_code == "":
+            pays_code = "FR"
+        
+        # Récupération de l'adresse ligne 2 si elle existe
+        adresse_ligne_2 = str(record_fields.get("Adresse ligne 2", "")).strip()
+        
+        # Vérification du format de l'email
+        if "@" not in email:
+            logger.warning(f"⚠️ Format d'email invalide: {email}")
+            return None
+        
+        # Format pour l'API Sellsy V2 - par défaut on considère un individu (particulier)
+        client_data = {
+            "third": {
+                "name": f"{prenom} {nom}",
+                "email": email,
+                "tel": telephone,
+                "type": "person"  # Personne physique par défaut
             },
-            "is_invoicing_address": True,
-            "is_delivery_address": True,
-            "is_main": True
-        },
-        # NOUVEAU : Ajout des champs personnalisés
-        "custom_fields": {
-            "installateur": nom_entreprise_installateur
+            "contact": {
+                "name": nom,
+                "firstname": prenom,
+                "email": email,
+                "tel": telephone,
+                "position": "Client"
+            },
+            "address": {
+                "name": "Adresse principale",
+                "address_line_1": adresse,
+                "address_line_2": adresse_ligne_2,
+                "postal_code": code_postal,
+                "city": ville,
+                "country": {
+                    "code": pays_code
+                },
+                "is_invoicing_address": True,
+                "is_delivery_address": True,
+                "is_main": True
+            }
         }
-    }
-    
-    # Vérification si c'est une entreprise (société)
-    societe = str(record_fields.get("Société", "")).strip()
-    if societe:
-        client_data["third"]["type"] = "corporation"
-        client_data["third"]["name"] = societe
-        # Ajout du numéro SIRET si disponible
-        siret = str(record_fields.get("SIRET", "")).strip()
-        if siret:
-            client_data["third"]["siret"] = siret
-    
-    logger.info(f"✅ Données client validées pour {prenom} {nom}")
-    if nom_entreprise_installateur:
-        logger.info(f"📋 Installateur associé : {nom_entreprise_installateur}")
-    
-    return client_data
+        
+        # Vérification si c'est une entreprise (société)
+        societe = str(record_fields.get("Société", "")).strip()
+        if societe:
+            client_data["third"]["type"] = "corporation"
+            client_data["third"]["name"] = societe
+            # Ajout du numéro SIRET si disponible
+            siret = str(record_fields.get("SIRET", "")).strip()
+            if siret:
+                client_data["third"]["siret"] = siret
+        
+        logger.info(f"✅ Données client validées pour {prenom} {nom}")
+        return client_data
 
     def synchronize_client(self, record: Dict):
         """
