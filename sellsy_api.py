@@ -537,6 +537,10 @@ class SellsyAPI:
         # Conversion du format des données pour l'API v2
         v2_client_data = self._prepare_client_data_for_v2(client_data, is_individual)
         
+        # Extraire les données temporaires avant l'envoi
+        address_data = v2_client_data.pop('_address_data', None)
+        contact_data = v2_client_data.pop('_contact_data', None)
+        
         # Déterminer l'endpoint en fonction du type de client
         endpoint = f"/individuals/{client_id}" if is_individual else f"/companies/{client_id}"
         
@@ -548,10 +552,21 @@ class SellsyAPI:
             return {"status": "success", "response": response}
         else:
             self.logger.error("❌ Échec de mise à jour du client")
-            return {"status": "error", "error": "Échec de mise à jour du client"}
-    
-    def search_clients(self, search_term=None, limit=100, offset=0, type_filter=None) -> Optional[Dict]:
-        """
+            # Créer l'adresse séparément si nécessaire
+            if client_id and address_data:
+                address_result = self.create_address(client_id, address_data, is_individual)
+                if address_result:
+                    self.logger.info(f"✅ Adresse créée avec succès pour le client {client_id}")
+                else:
+                    self.logger.warning(f"⚠️ Échec de création d'adresse pour le client {client_id}")
+            
+            # Créer le contact séparément pour les entreprises
+            if client_id and contact_data and not is_individual:
+                contact_result = self._create_client_contact(client_id, contact_data)
+                if contact_result:
+                    self.logger.info(f"✅ Contact créé avec succès pour l'entreprise {client_id}")
+                else:
+                    self.logger.warning(f"⚠️ Échec de création du contact pour l'entreprise {client_id}")
         Recherche des clients dans Sellsy.
         
         Args:
@@ -650,8 +665,17 @@ class SellsyAPI:
         """
         endpoint = f"/companies/{client_id}/contacts"
         
+        # Formater les données du contact pour l'API v2
+        formatted_contact = {
+            "first_name": contact_data.get("firstname", ""),
+            "last_name": contact_data.get("name", ""),
+            "email": contact_data.get("email", ""),
+            "phone_number": contact_data.get("tel", ""),
+            "position": contact_data.get("position", "Contact")
+        }
+        
         self.logger.info(f"🔄 Création d'un contact pour l'entreprise ID: {client_id}")
-        result = self.request_api("POST", endpoint, contact_data)
+        result = self.request_api("POST", endpoint, formatted_contact)
         
         if result:
             self.logger.info(f"✅ Contact créé avec succès pour l'entreprise {client_id}")
