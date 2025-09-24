@@ -432,7 +432,7 @@ class SellsyAPI:
                 "name": third.get("name", ""),
                 "email": third.get("email", ""),
                 "mobile": third.get("tel", ""),
-                "ident": "client"
+                "type": "client"
             }
             
             # SIRET si disponible
