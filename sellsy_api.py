@@ -322,9 +322,8 @@ class SellsyAPI:
                 self.logger.error("❌ Impossible d'obtenir un token valide")
                 return False
             
-            # L'endpoint /myself n'existe pas dans l'API v2
-            # À la place, on utilise un endpoint qui existe sûrement dans l'API v2 comme /individuals ou /companies avec une limite à 1
-            response = self.request_api("GET", "/individuals", params={"limit": 1})
+            # Test avec l'endpoint /companies selon la documentation
+            response = self.request_api("GET", "/companies", params={"pagination[limit]": 1})
             
             if response is not None:
                 self.logger.info("✅ Authentification réussie!")
@@ -435,45 +434,33 @@ class SellsyAPI:
         
         # Formatage en fonction du type de client
         if is_individual:
-            # Format pour les particuliers (individuals)
+            # Format pour les particuliers selon la doc API v2
             result = {
-                "first_name": contact.get("firstname", ""),
-                "last_name": contact.get("name", ""),
+                "firstname": contact.get("firstname", ""),
+                "name": contact.get("name", ""),
                 "email": contact.get("email", ""),
-                "phone_number": contact.get("tel", ""),
-                "civil": {
-                    "civil": "mr" if contact.get("civility") == "man" else "mrs"
-                },
-                "type": "client"  # Type du client (prospect/client)
+                "mobile": contact.get("tel", ""),
+                "ident": "client"
             }
             
-            # Pour les particuliers, les adresses sont incluses directement dans la requête
+            # Stocker les données d'adresse pour création séparée
             if address:
-                result["address"] = {
-                    "name": address.get("name", "Adresse principale"),
-                    "address": address.get("address_line_1", ""),
-                    "addressComplement": address.get("address_line_2", ""),
-                    "zipcode": address.get("postal_code", ""),
-                    "city": address.get("city", ""),
-                    "country": address.get("country", {}).get("code", "FR")
-                }
+                result["_address_data"] = address
                 
         else:
-            # Format pour les entreprises (companies)
+            # Format pour les entreprises selon la doc API v2
             result = {
                 "name": third.get("name", ""),
                 "email": third.get("email", ""),
-                "phone_number": third.get("tel", ""),
-                "note": third.get("notes", ""),
-                "type": "client"  # Type du client (prospect/client)
+                "mobile": third.get("tel", ""),
+                "ident": "client"
             }
             
             # SIRET si disponible
             if "siret" in third and third["siret"]:
                 result["siret"] = third["siret"]
             
-            # Pour les entreprises, on stocke les données d'adresse et de contact séparément
-            # pour les créer après la création de l'entreprise
+            # Stocker les données pour création séparée
             if address:
                 result["_address_data"] = address
             if contact:
@@ -493,15 +480,12 @@ class SellsyAPI:
             Données d'adresse au format v2
         """
         return {
-            "name": address.get("name", "Adresse principale"),
+            "label": address.get("name", "Adresse principale"),
             "address": address.get("address_line_1", ""),
-            "addressComplement": address.get("address_line_2", ""),
-            "zipcode": address.get("postal_code", ""),
+            "address2": address.get("address_line_2", ""),
+            "zip": address.get("postal_code", ""),
             "city": address.get("city", ""),
-            "country": address.get("country", {}).get("code", "FR"),
-            "isMain": True,
-            "isInvoicing": True,
-            "isDelivery": True
+            "countrycode": address.get("country", {}).get("code", "FR")
         }
     
     def get_client(self, client_id: str, is_individual: bool = False) -> Optional[Dict]:
@@ -665,13 +649,14 @@ class SellsyAPI:
         """
         endpoint = f"/companies/{client_id}/contacts"
         
-        # Formater les données du contact pour l'API v2
+        # Formater les données du contact selon la doc API v2
         formatted_contact = {
-            "first_name": contact_data.get("firstname", ""),
-            "last_name": contact_data.get("name", ""),
+            "firstname": contact_data.get("firstname", ""),
+            "name": contact_data.get("name", ""),
             "email": contact_data.get("email", ""),
-            "phone_number": contact_data.get("tel", ""),
-            "position": contact_data.get("position", "Contact")
+            "mobile": contact_data.get("tel", ""),
+            "position": contact_data.get("position", "Contact"),
+            "ident": "contact"
         }
         
         self.logger.info(f"🔄 Création d'un contact pour l'entreprise ID: {client_id}")
