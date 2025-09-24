@@ -189,12 +189,16 @@ class ClientSynchronizer:
         # Vérification si c'est une entreprise (société)
         nom_entreprise = str(record_fields.get("Nom de l'entreprise", "")).strip()
         if nom_entreprise:
+            # C'est une entreprise
             client_data["third"]["type"] = "corporation"
             client_data["third"]["name"] = nom_entreprise
             # Ajout du numéro SIRET si disponible
             siret = str(record_fields.get("SIRET", "")).strip()
             if siret:
                 client_data["third"]["siret"] = siret
+        else:
+            # C'est un particulier - on garde le nom par défaut "Prénom Nom"
+            client_data["third"]["type"] = "person"
         
         logger.info(f"✅ Données client validées pour {prenom} {nom}")
         return client_data
