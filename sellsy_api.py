@@ -424,7 +424,7 @@ class SellsyAPI:
                 "name": contact.get("name", ""),
                 "email": contact.get("email", ""),
                 "mobile": contact.get("tel", ""),
-                "ident": "client"
+                "type": "client"
             }
         else:
             # Format pour les entreprises selon la doc API v2
