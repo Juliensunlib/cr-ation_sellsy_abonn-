@@ -161,7 +161,7 @@ class ClientSynchronizer:
         adresse_ligne_2 = str(record_fields.get("Adresse ligne 2", "")).strip()
         
         # Récupération du champ installateur
-        installateur = str(record_fields.get("Installateur", "")).strip()
+        installateur = str(record_fields.get("Nom de l'entreprise (from Installateur)", "")).strip()
         
         # Récupération du champ contrat abonné pour la référence
         contrat_abonne = str(record_fields.get("Contrat abonné", "")).strip()
