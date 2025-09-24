@@ -426,6 +426,14 @@ class SellsyAPI:
                 "mobile": contact.get("tel", ""),
                 "type": "client"
             }
+            
+            # Ajout des champs personnalisés pour les particuliers
+            custom_fields = {}
+            if "installateur" in third and third["installateur"]:
+                custom_fields["installateur"] = third["installateur"]
+            
+            if custom_fields:
+                result["customFields"] = custom_fields
         else:
             # Format pour les entreprises selon la doc API v2
             result = {
@@ -437,6 +445,14 @@ class SellsyAPI:
             # SIRET si disponible
             if "siret" in third and third["siret"]:
                 result["siret"] = third["siret"]
+            
+            # Ajout des champs personnalisés pour les entreprises
+            custom_fields = {}
+            if "installateur" in third and third["installateur"]:
+                custom_fields["installateur"] = third["installateur"]
+            
+            if custom_fields:
+                result["customFields"] = custom_fields
         
         # Stocker les données pour création séparée
         if address:
