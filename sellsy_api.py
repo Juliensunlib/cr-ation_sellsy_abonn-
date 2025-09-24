@@ -483,12 +483,11 @@ class SellsyAPI:
         """
         return {
             "name": address.get("name", "Adresse principale"),
-            "label": address.get("name", "Adresse principale"),
             "address": address.get("address_line_1", ""),
-            "address2": address.get("address_line_2", ""),
-            "zip": address.get("postal_code", ""),
+            "addressComplement": address.get("address_line_2", ""),
+            "zipcode": address.get("postal_code", ""),
             "city": address.get("city", ""),
-            "countrycode": address.get("country", {}).get("code", "FR")
+            "countrycode": address.get("country", {}).get("code", "FR") if isinstance(address.get("country", {}), dict) else address.get("country", "FR")
         }
     
     def get_client(self, client_id: str, is_individual: bool = False) -> Optional[Dict]:

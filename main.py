@@ -342,10 +342,7 @@ class ClientSynchronizer:
                 "addressComplement": address_data.get("address_line_2", ""),
                 "zipcode": address_data.get("postal_code", ""),
                 "city": address_data.get("city", ""),
-                "country": address_data.get("country", {}).get("code", "FR") if isinstance(address_data.get("country", {}), dict) else "FR",
-                "isMain": True,
-                "isInvoicing": True,
-                "isDelivery": True
+                "countrycode": address_data.get("country", {}).get("code", "FR") if isinstance(address_data.get("country", {}), dict) else address_data.get("country", "FR")
             }
             
             logger.debug(f"Création d'adresse pour client {client_id}: {formatted_address}")
@@ -353,7 +350,7 @@ class ClientSynchronizer:
             # Créer l'adresse via l'API Sellsy
             result = self.sellsy_api.create_address(client_id, formatted_address, is_individual)
             
-            return result is not None and result != False
+            return result is not None
             
         except Exception as e:
             logger.error(f"❌ Erreur lors de la création de l'adresse: {str(e)}")
