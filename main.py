@@ -119,10 +119,21 @@ class ClientSynchronizer:
         Returns:
             Données client formatées pour Sellsy ou None si données invalides
         """
-        required_fields = [
-            'Nom', 'Prenom', 'Email', 'Téléphone', 
-            'Adresse complète', 'Code postal', 'Ville'
-        ]
+        # Vérifier d'abord si c'est une entreprise ou un particulier
+        nom_entreprise = str(record_fields.get("Nom de l'entreprise", "")).strip()
+        
+        if nom_entreprise:
+            # Pour les entreprises : pas besoin de Nom/Prénom individuels
+            required_fields = [
+                'Nom de l\'entreprise', 'Email', 'Téléphone', 
+                'Adresse complète', 'Code postal', 'Ville'
+            ]
+        else:
+            # Pour les particuliers : Nom et Prénom sont requis
+            required_fields = [
+                'Nom', 'Prenom', 'Email', 'Téléphone', 
+                'Adresse complète', 'Code postal', 'Ville'
+            ]
         
         # Vérifie que tous les champs requis sont présents et non vides
         missing_fields = []
@@ -134,9 +145,7 @@ class ClientSynchronizer:
             logger.warning(f"⚠️ Champs manquants ou vides : {', '.join(missing_fields)}")
             return None
         
-        # Nettoyage des données
-        nom = str(record_fields["Nom"]).strip()
-        prenom = str(record_fields["Prenom"]).strip()
+        # Nettoyage des données communes
         email = str(record_fields["Email"]).strip()
         telephone = str(record_fields["Téléphone"]).strip()
         adresse = str(record_fields["Adresse complète"]).strip()
@@ -156,51 +165,79 @@ class ClientSynchronizer:
             logger.warning(f"⚠️ Format d'email invalide: {email}")
             return None
         
-        # Format pour l'API Sellsy V2 - par défaut on considère un individu (particulier)
-        client_data = {
-            "third": {
-                "name": f"{prenom} {nom}",
-                "email": email,
-                "tel": telephone,
-                "type": "person"  # Personne physique par défaut
-            },
-            "contact": {
-                "name": nom,
-                "firstname": prenom,
-                "email": email,
-                "tel": telephone,
-                "position": "Client"
-            },
-            "address": {
-                "name": "Adresse principale",
-                "address_line_1": adresse,
-                "address_line_2": adresse_ligne_2,
-                "postal_code": code_postal,
-                "city": ville,
-                "country": {
-                    "code": pays_code
-                },
-                "is_invoicing_address": True,
-                "is_delivery_address": True,
-                "is_main": True
-            }
-        }
-        
-        # Vérification si c'est une entreprise (société)
-        nom_entreprise = str(record_fields.get("Nom de l'entreprise", "")).strip()
+        # Format pour l'API Sellsy V2 selon le type de client
         if nom_entreprise:
-            # C'est une entreprise
-            client_data["third"]["type"] = "corporation"
-            client_data["third"]["name"] = nom_entreprise
-            # Ajout du numéro SIRET si disponible
+            # C'est une entreprise - pas de contact individuel
+            client_data = {
+                "third": {
+                    "name": nom_entreprise,
+                    "email": email,
+                    "tel": telephone,
+                    "type": "corporation"
+                },
+                "contact": {
+                    "name": nom_entreprise,
+                    "firstname": "",
+                    "email": email,
+                    "tel": telephone,
+                    "position": "Entreprise"
+                },
+                "address": {
+                    "name": "Adresse principale",
+                    "address_line_1": adresse,
+                    "address_line_2": adresse_ligne_2,
+                    "postal_code": code_postal,
+                    "city": ville,
+                    "country": {
+                        "code": pays_code
+                    },
+                    "is_invoicing_address": True,
+                    "is_delivery_address": True,
+                    "is_main": True
+                }
+            }
+            
             siret = str(record_fields.get("SIRET", "")).strip()
             if siret:
                 client_data["third"]["siret"] = siret
+                
+            logger.info(f"✅ Données entreprise validées pour {nom_entreprise}")
         else:
-            # C'est un particulier - on garde le nom par défaut "Prénom Nom"
-            client_data["third"]["type"] = "person"
+            # C'est un particulier
+            nom = str(record_fields["Nom"]).strip()
+            prenom = str(record_fields["Prenom"]).strip()
+            
+            client_data = {
+                "third": {
+                    "name": f"{prenom} {nom}",
+                    "email": email,
+                    "tel": telephone,
+                    "type": "person"
+                },
+                "contact": {
+                    "name": nom,
+                    "firstname": prenom,
+                    "email": email,
+                    "tel": telephone,
+                    "position": "Client"
+                },
+                "address": {
+                    "name": "Adresse principale",
+                    "address_line_1": adresse,
+                    "address_line_2": adresse_ligne_2,
+                    "postal_code": code_postal,
+                    "city": ville,
+                    "country": {
+                        "code": pays_code
+                    },
+                    "is_invoicing_address": True,
+                    "is_delivery_address": True,
+                    "is_main": True
+                }
+            }
+            
+            logger.info(f"✅ Données client validées pour {prenom} {nom}")
         
-        logger.info(f"✅ Données client validées pour {prenom} {nom}")
         return client_data
 
     def synchronize_client(self, record: Dict):
