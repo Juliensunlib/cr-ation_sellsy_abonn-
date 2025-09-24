@@ -355,6 +355,10 @@ class SellsyAPI:
             # Conversion du format des données pour l'API v2
             v2_client_data = self._prepare_client_data_for_v2(client_data, is_individual)
             
+            # Extraire les données temporaires avant l'envoi
+            address_data = v2_client_data.pop('_address_data', None)
+            contact_data = v2_client_data.pop('_contact_data', None)
+            
             # API v2 utilise différents endpoints pour individus et entreprises
             if is_individual:
                 endpoint = "/individuals"
@@ -370,10 +374,21 @@ class SellsyAPI:
                 client_id = response.get("id")
                 self.logger.info(f"✅ Client créé avec succès! ID: {client_id}")
                 
-                # Si des adresses ont été fournies mais n'ont pas été incluses dans la création initiale
-                # (par exemple pour les entreprises où les adresses doivent être ajoutées séparément)
-                if client_id and "addresses" in v2_client_data and not is_individual:
-                    self._create_client_addresses(client_id, v2_client_data["addresses"], is_individual)
+                # Créer l'adresse séparément si nécessaire
+                if client_id and address_data:
+                    address_result = self.create_address(client_id, address_data, is_individual)
+                    if address_result:
+                        self.logger.info(f"✅ Adresse créée avec succès pour le client {client_id}")
+                    else:
+                        self.logger.warning(f"⚠️ Échec de création d'adresse pour le client {client_id}")
+                
+                # Créer le contact séparément pour les entreprises
+                if client_id and contact_data and not is_individual:
+                    contact_result = self._create_client_contact(client_id, contact_data)
+                    if contact_result:
+                        self.logger.info(f"✅ Contact créé avec succès pour l'entreprise {client_id}")
+                    else:
+                        self.logger.warning(f"⚠️ Échec de création du contact pour l'entreprise {client_id}")
                 
                 return {"status": "success", "client_id": client_id, "response": client_id}
             else:
@@ -384,37 +399,6 @@ class SellsyAPI:
             self.logger.error(f"❌ Erreur lors de la création du client: {str(e)}")
             self.logger.exception("Détails:")
             return {"status": "error", "error": str(e)}
-    
-    def _create_client_addresses(self, client_id: str, addresses: List[Dict], is_individual: bool = False) -> bool:
-        """
-        Crée des adresses pour un client existant.
-        
-        Args:
-            client_id: ID du client
-            addresses: Liste des adresses à créer
-            is_individual: True si le client est un particulier, False sinon
-            
-        Returns:
-            True si la création a réussi, False sinon
-        """
-        if not addresses:
-            return True
-        
-        entity_type = "individuals" if is_individual else "companies"
-        endpoint = f"/{entity_type}/{client_id}/addresses"
-        
-        for address in addresses:
-            try:
-                response = self.request_api("POST", endpoint, address)
-                if not response:
-                    self.logger.error(f"❌ Échec de création d'adresse pour le client {client_id}")
-                    return False
-                self.logger.info(f"✅ Adresse créée avec succès pour le client {client_id}")
-            except Exception as e:
-                self.logger.error(f"❌ Erreur lors de la création d'adresse: {str(e)}")
-                return False
-        
-        return True
     
     def _prepare_client_data_for_v2(self, old_data: Dict, is_individual: bool) -> Dict:
         """
@@ -442,11 +426,6 @@ class SellsyAPI:
                 "mobile": contact.get("tel", ""),
                 "ident": "client"
             }
-            
-            # Stocker les données d'adresse pour création séparée
-            if address:
-                result["_address_data"] = address
-                
         else:
             # Format pour les entreprises selon la doc API v2
             result = {
@@ -459,12 +438,12 @@ class SellsyAPI:
             # SIRET si disponible
             if "siret" in third and third["siret"]:
                 result["siret"] = third["siret"]
-            
-            # Stocker les données pour création séparée
-            if address:
-                result["_address_data"] = address
-            if contact:
-                result["_contact_data"] = contact
+        
+        # Stocker les données pour création séparée
+        if address:
+            result["_address_data"] = address
+        if contact and not is_individual:
+            result["_contact_data"] = contact
         
         self.logger.debug(f"Données client formatées pour v2: {result}")
         return result
@@ -533,9 +512,7 @@ class SellsyAPI:
         
         if response:
             self.logger.info(f"✅ Client mis à jour avec succès!")
-            return {"status": "success", "response": response}
-        else:
-            self.logger.error("❌ Échec de mise à jour du client")
+            
             # Créer l'adresse séparément si nécessaire
             if client_id and address_data:
                 address_result = self.create_address(client_id, address_data, is_individual)
@@ -551,6 +528,14 @@ class SellsyAPI:
                     self.logger.info(f"✅ Contact créé avec succès pour l'entreprise {client_id}")
                 else:
                     self.logger.warning(f"⚠️ Échec de création du contact pour l'entreprise {client_id}")
+            
+            return {"status": "success", "response": response}
+        else:
+            self.logger.error("❌ Échec de mise à jour du client")
+            return {"status": "error", "error": "Échec de mise à jour du client"}
+    
+    def search_clients(self, search_term: str = None, limit: int = 100, offset: int = 0, type_filter: str = None) -> Optional[Dict]:
+        """
         Recherche des clients dans Sellsy.
         
         Args:
@@ -566,8 +551,8 @@ class SellsyAPI:
         
         # Paramètres de recherche
         params = {
-            "limit": limit,
-            "offset": offset
+            "pagination[limit]": limit,
+            "pagination[offset]": offset
         }
         
         if search_term:
