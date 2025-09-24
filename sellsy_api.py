@@ -432,6 +432,10 @@ class SellsyAPI:
             if "installateur" in third and third["installateur"]:
                 custom_fields["installateur"] = third["installateur"]
             
+            # Ajout de la référence si présente
+            if "contrat_abonne" in third and third["contrat_abonne"]:
+                result["reference"] = third["contrat_abonne"]
+            
             if custom_fields:
                 result["customFields"] = custom_fields
         else:
@@ -450,6 +454,10 @@ class SellsyAPI:
             custom_fields = {}
             if "installateur" in third and third["installateur"]:
                 custom_fields["installateur"] = third["installateur"]
+            
+            # Ajout de la référence si présente
+            if "contrat_abonne" in third and third["contrat_abonne"]:
+                result["reference"] = third["contrat_abonne"]
             
             if custom_fields:
                 result["customFields"] = custom_fields

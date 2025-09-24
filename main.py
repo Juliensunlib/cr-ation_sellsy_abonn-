@@ -163,6 +163,9 @@ class ClientSynchronizer:
         # Récupération du champ installateur
         installateur = str(record_fields.get("Installateur", "")).strip()
         
+        # Récupération du champ contrat abonné pour la référence
+        contrat_abonne = str(record_fields.get("Contrat abonné", "")).strip()
+        
         # Vérification du format de l'email
         if "@" not in email:
             logger.warning(f"⚠️ Format d'email invalide: {email}")
@@ -207,6 +210,10 @@ class ClientSynchronizer:
             # Ajout du champ installateur si présent
             if installateur:
                 client_data["third"]["installateur"] = installateur
+            
+            # Ajout de la référence si présente
+            if contrat_abonne:
+                client_data["third"]["contrat_abonne"] = contrat_abonne
                 
             logger.info(f"✅ Données entreprise validées pour {nom_entreprise}")
         else:
@@ -246,6 +253,10 @@ class ClientSynchronizer:
             # Ajout du champ installateur si présent
             if installateur:
                 client_data["third"]["installateur"] = installateur
+            
+            # Ajout de la référence si présente
+            if contrat_abonne:
+                client_data["third"]["contrat_abonne"] = contrat_abonne
             
             logger.info(f"✅ Données client validées pour {prenom} {nom}")
         
