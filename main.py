@@ -338,11 +338,11 @@ class ClientSynchronizer:
             # Formater l'adresse pour l'API Sellsy v2
             formatted_address = {
                 "name": address_data.get("name", "Adresse principale"),
-                "address": address_data.get("address_line_1", ""),
-                "addressComplement": address_data.get("address_line_2", ""),
-                "zipcode": address_data.get("postal_code", ""),
+                "address_line_1": address_data.get("address_line_1", ""),
+                "address_line_2": address_data.get("address_line_2", ""),
+                "postal_code": address_data.get("postal_code", ""),
                 "city": address_data.get("city", ""),
-                "countrycode": address_data.get("country", {}).get("code", "FR") if isinstance(address_data.get("country", {}), dict) else address_data.get("country", "FR")
+                "country_code": address_data.get("country", {}).get("code", "FR") if isinstance(address_data.get("country", {}), dict) else address_data.get("country", "FR")
             }
             
             logger.debug(f"Création d'adresse pour client {client_id}: {formatted_address}")
