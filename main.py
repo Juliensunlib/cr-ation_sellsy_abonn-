@@ -147,7 +147,7 @@ class ClientSynchronizer:
         
         # Nettoyage des données communes
         email = str(record_fields["Email"]).strip()
-        telephone = str(record_fields.get("Téléphone", "")).strip()
+        telephone = str(record_fields.get("Téléphone", "")).strip() if record_fields.get("Téléphone") else ""
         adresse = str(record_fields["Adresse complète"]).strip()
         code_postal = str(record_fields["Code postal"]).strip()
         ville = str(record_fields["Ville"]).strip()
@@ -251,10 +251,15 @@ class ClientSynchronizer:
                 }
             }
             
+            # Ajouter le téléphone seulement s'il est présent
+            if telephone:
+                client_data["third"]["tel"] = telephone
+                client_data["contact"]["tel"] = telephone
+            
             # Ajout du champ installateur si présent
             if installateur:
                 client_data["third"]["installateur"] = installateur
-            
+                'Nom', 'Prenom', 'Email',
             # Ajout de la référence si présente
             if contrat_abonne:
                 client_data["third"]["contrat_abonne"] = contrat_abonne
