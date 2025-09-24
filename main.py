@@ -160,6 +160,9 @@ class ClientSynchronizer:
         # Récupération de l'adresse ligne 2 si elle existe
         adresse_ligne_2 = str(record_fields.get("Adresse ligne 2", "")).strip()
         
+        # Récupération du champ installateur
+        installateur = str(record_fields.get("Installateur", "")).strip()
+        
         # Vérification du format de l'email
         if "@" not in email:
             logger.warning(f"⚠️ Format d'email invalide: {email}")
@@ -200,6 +203,10 @@ class ClientSynchronizer:
             siret = str(record_fields.get("SIRET", "")).strip()
             if siret:
                 client_data["third"]["siret"] = siret
+            
+            # Ajout du champ installateur si présent
+            if installateur:
+                client_data["third"]["installateur"] = installateur
                 
             logger.info(f"✅ Données entreprise validées pour {nom_entreprise}")
         else:
@@ -235,6 +242,10 @@ class ClientSynchronizer:
                     "is_main": True
                 }
             }
+            
+            # Ajout du champ installateur si présent
+            if installateur:
+                client_data["third"]["installateur"] = installateur
             
             logger.info(f"✅ Données client validées pour {prenom} {nom}")
         
