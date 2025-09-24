@@ -125,13 +125,13 @@ class ClientSynchronizer:
         if nom_entreprise:
             # Pour les entreprises : pas besoin de Nom/Prénom individuels
             required_fields = [
-                'Nom de l\'entreprise', 'Email', 'Téléphone', 
+                'Nom de l\'entreprise', 'Email', 
                 'Adresse complète', 'Code postal', 'Ville'
             ]
         else:
             # Pour les particuliers : Nom et Prénom sont requis
             required_fields = [
-                'Nom', 'Prenom', 'Email', 'Téléphone', 
+                'Nom', 'Prenom', 'Email', 
                 'Adresse complète', 'Code postal', 'Ville'
             ]
         
@@ -147,7 +147,7 @@ class ClientSynchronizer:
         
         # Nettoyage des données communes
         email = str(record_fields["Email"]).strip()
-        telephone = str(record_fields["Téléphone"]).strip()
+        telephone = str(record_fields.get("Téléphone", "")).strip()
         adresse = str(record_fields["Adresse complète"]).strip()
         code_postal = str(record_fields["Code postal"]).strip()
         ville = str(record_fields["Ville"]).strip()
@@ -178,14 +178,12 @@ class ClientSynchronizer:
                 "third": {
                     "name": nom_entreprise,
                     "email": email,
-                    "tel": telephone,
                     "type": "corporation"
                 },
                 "contact": {
                     "name": nom_entreprise,
                     "firstname": "",
                     "email": email,
-                    "tel": telephone,
                     "position": "Entreprise"
                 },
                 "address": {
@@ -202,6 +200,11 @@ class ClientSynchronizer:
                     "is_main": True
                 }
             }
+            
+            # Ajouter le téléphone seulement s'il est présent
+            if telephone:
+                client_data["third"]["tel"] = telephone
+                client_data["contact"]["tel"] = telephone
             
             siret = str(record_fields.get("SIRET", "")).strip()
             if siret:
@@ -225,14 +228,12 @@ class ClientSynchronizer:
                 "third": {
                     "name": f"{prenom} {nom}",
                     "email": email,
-                    "tel": telephone,
                     "type": "person"
                 },
                 "contact": {
                     "name": nom,
                     "firstname": prenom,
                     "email": email,
-                    "tel": telephone,
                     "position": "Client"
                 },
                 "address": {
