@@ -482,7 +482,7 @@ class SellsyAPI:
             Données d'adresse au format v2
         """
         return {
-            "name": address.get("name", "Adresse principale"),
+            "name": "Adresse principale",  # Nom descriptif de l'adresse
             "address": address.get("address_line_1", ""),
             "addressComplement": address.get("address_line_2", ""),
             "zipcode": address.get("postal_code", ""),
