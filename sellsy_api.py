@@ -421,7 +421,7 @@ class SellsyAPI:
             # Format pour les particuliers selon la doc API v2
             result = {
                 "firstname": contact.get("firstname", ""),
-                "name": contact.get("name", ""),
+                "last_name": contact.get("name", ""),
                 "email": contact.get("email", ""),
                 "mobile": contact.get("tel", ""),
                 "type": "client"
