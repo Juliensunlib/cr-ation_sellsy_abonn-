@@ -431,7 +431,6 @@ class SellsyAPI:
             result = {
                 "name": third.get("name", ""),
                 "email": third.get("email", ""),
-                "phone": third.get("tel", ""),
                 "type": "client"
             }
             
