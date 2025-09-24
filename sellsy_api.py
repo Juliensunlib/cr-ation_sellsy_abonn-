@@ -472,37 +472,12 @@ class SellsyAPI:
             if "siret" in third and third["siret"]:
                 result["siret"] = third["siret"]
             
-            # Pour les entreprises, on prépare les adresses mais elles seront ajoutées séparément après la création
+            # Pour les entreprises, on stocke les données d'adresse et de contact séparément
+            # pour les créer après la création de l'entreprise
             if address:
-                addresses = []
-                address_data = {
-                    "name": address.get("name", "Adresse principale"),
-                    "address": address.get("address_line_1", ""),
-                    "addressComplement": address.get("address_line_2", ""),
-                    "zipcode": address.get("postal_code", ""),
-                    "city": address.get("city", ""),
-                    "country": address.get("country", {}).get("code", "FR"),
-                    "isMain": True,
-                    "isInvoicing": True,
-                    "isDelivery": True
-                }
-                addresses.append(address_data)
-                result["addresses"] = addresses
-            
-            # Ajout du contact pour les entreprises
+                result["_address_data"] = address
             if contact:
-                contact_data = {
-                    "first_name": contact.get("firstname", ""),
-                    "last_name": contact.get("name", ""),
-                    "email": contact.get("email", ""),
-                    "phone_number": contact.get("tel", ""),
-                    "mobile_number": contact.get("mobile", ""),
-                    "position": contact.get("position", ""),
-                    "civil": {
-                        "civil": "mr" if contact.get("civility") == "man" else "mrs"
-                    }
-                }
-                result["contacts"] = [contact_data]
+                result["_contact_data"] = contact
         
         self.logger.debug(f"Données client formatées pour v2: {result}")
         return result
@@ -661,3 +636,26 @@ class SellsyAPI:
         
         self.logger.info(f"🔄 Récupération des adresses du client ID: {client_id}")
         return self.request_api("GET", endpoint)
+    
+    def _create_client_contact(self, client_id: str, contact_data: Dict) -> bool:
+        """
+        Crée un contact pour une entreprise existante.
+        
+        Args:
+            client_id: ID de l'entreprise
+            contact_data: Données du contact à créer
+            
+        Returns:
+            True si la création a réussi, False sinon
+        """
+        endpoint = f"/companies/{client_id}/contacts"
+        
+        self.logger.info(f"🔄 Création d'un contact pour l'entreprise ID: {client_id}")
+        result = self.request_api("POST", endpoint, contact_data)
+        
+        if result:
+            self.logger.info(f"✅ Contact créé avec succès pour l'entreprise {client_id}")
+            return True
+        else:
+            self.logger.error(f"❌ Échec de création du contact pour l'entreprise {client_id}")
+            return False
