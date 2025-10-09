@@ -459,6 +459,8 @@ class SellsyAPI:
         custom_fields = {}
         if "installateur" in third and third["installateur"]:
             custom_fields["installateur"] = third["installateur"]
+        if "puissance_en_kwc" in third and third["puissance_en_kwc"]:
+            custom_fields["puissance-en-kwc"] = third["puissance_en_kwc"]
 
         if custom_fields:
             result["_custom_fields"] = custom_fields

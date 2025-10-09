@@ -162,7 +162,10 @@ class ClientSynchronizer:
         
         # Récupération du champ installateur
         installateur = str(record_fields.get("Nom de l'entreprise (from Installateur)", "")).strip()
-        
+
+        # Récupération du champ puissance installée en kWc
+        puissance_kwc = str(record_fields.get("Puissance installée en kWc", "")).strip()
+
         # Récupération du champ contrat abonné pour la référence
         contrat_abonne = str(record_fields.get("Contrat abonné", "")).strip()
         
@@ -213,7 +216,11 @@ class ClientSynchronizer:
             # Ajout du champ installateur si présent
             if installateur:
                 client_data["third"]["installateur"] = installateur
-            
+
+            # Ajout du champ puissance en kWc si présent
+            if puissance_kwc:
+                client_data["third"]["puissance_en_kwc"] = puissance_kwc
+
             # Ajout de la référence si présente
             if contrat_abonne:
                 client_data["third"]["contrat_abonne"] = contrat_abonne
@@ -259,7 +266,11 @@ class ClientSynchronizer:
             # Ajout du champ installateur si présent
             if installateur:
                 client_data["third"]["installateur"] = installateur
-                'Nom', 'Prenom', 'Email',
+
+            # Ajout du champ puissance en kWc si présent
+            if puissance_kwc:
+                client_data["third"]["puissance_en_kwc"] = puissance_kwc
+
             # Ajout de la référence si présente
             if contrat_abonne:
                 client_data["third"]["contrat_abonne"] = contrat_abonne
