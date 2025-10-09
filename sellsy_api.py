@@ -358,6 +358,7 @@ class SellsyAPI:
             # Extraire les données temporaires avant l'envoi
             address_data = v2_client_data.pop('_address_data', None)
             contact_data = v2_client_data.pop('_contact_data', None)
+            custom_fields_data = v2_client_data.pop('_custom_fields', None)
             
             # API v2 utilise différents endpoints pour individus et entreprises
             if is_individual:
@@ -389,7 +390,15 @@ class SellsyAPI:
                         self.logger.info(f"✅ Contact créé avec succès pour l'entreprise {client_id}")
                     else:
                         self.logger.warning(f"⚠️ Échec de création du contact pour l'entreprise {client_id}")
-                
+
+                # Mettre à jour les champs personnalisés si nécessaires
+                if client_id and custom_fields_data:
+                    custom_fields_result = self.update_custom_fields(client_id, custom_fields_data, is_individual)
+                    if custom_fields_result:
+                        self.logger.info(f"✅ Champs personnalisés mis à jour avec succès pour le client {client_id}")
+                    else:
+                        self.logger.warning(f"⚠️ Échec de mise à jour des champs personnalisés pour le client {client_id}")
+
                 return {"status": "success", "client_id": client_id, "response": client_id}
             else:
                 self.logger.error("❌ Échec de création du client")
@@ -437,15 +446,23 @@ class SellsyAPI:
                 "email": third.get("email", ""),
                 "type": "client"
             }
-            
+
             # SIRET si disponible
             if "siret" in third and third["siret"]:
                 result["siret"] = third["siret"]
-            
+
             # Ajout de la référence si présente
             if "contrat_abonne" in third and third["contrat_abonne"]:
                 result["reference"] = third["contrat_abonne"]
-        
+
+        # Stocker les champs personnalisés séparément
+        custom_fields = {}
+        if "installateur" in third and third["installateur"]:
+            custom_fields["installateur"] = third["installateur"]
+
+        if custom_fields:
+            result["_custom_fields"] = custom_fields
+
         # Stocker les données pour création séparée
         if address:
             result["_address_data"] = address
@@ -628,15 +645,35 @@ class SellsyAPI:
         self.logger.info(f"🔄 Récupération des adresses du client ID: {client_id}")
         return self.request_api("GET", endpoint)
     
+    def update_custom_fields(self, client_id: str, custom_fields: Dict, is_individual: bool = False) -> Optional[Dict]:
+        """
+        Met à jour les champs personnalisés d'un client (société ou particulier).
+
+        Args:
+            client_id: ID du client
+            custom_fields: Dictionnaire des champs personnalisés à mettre à jour
+            is_individual: True si le client est un particulier, False sinon
+
+        Returns:
+            Réponse de l'API ou None en cas d'erreur
+        """
+        entity_type = "individuals" if is_individual else "companies"
+        endpoint = f"/{entity_type}/{client_id}/custom-fields"
+
+        self.logger.info(f"🔄 Mise à jour des champs personnalisés pour le client ID: {client_id}")
+        self.logger.debug(f"Champs personnalisés à envoyer: {custom_fields}")
+
+        return self.request_api("PUT", endpoint, custom_fields)
+
     def _create_client_contact(self, client_id: str, contact_data: Dict) -> bool:
         """
         Crée un contact pour une entreprise existante.
         Note: Cette fonctionnalité semble ne pas être disponible via POST dans l'API v2.
-        
+
         Args:
             client_id: ID de l'entreprise
             contact_data: Données du contact à créer
-            
+
         Returns:
             True si la création a réussi, False sinon
         """
