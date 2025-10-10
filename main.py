@@ -160,11 +160,23 @@ class ClientSynchronizer:
         # Récupération de l'adresse ligne 2 si elle existe
         adresse_ligne_2 = str(record_fields.get("Adresse ligne 2", "")).strip()
         
-        # Récupération du champ installateur
-        installateur = str(record_fields.get("Nom de l'entreprise (from Installateur)", "")).strip()
+        # Récupération du champ installateur (peut être une liste dans Airtable)
+        installateur_raw = record_fields.get("Nom de l'entreprise (from Installateur)", "")
+        if isinstance(installateur_raw, list) and len(installateur_raw) > 0:
+            installateur = str(installateur_raw[0]).strip()
+        elif installateur_raw:
+            installateur = str(installateur_raw).strip()
+        else:
+            installateur = ""
 
         # Récupération du champ puissance installée en kWc
-        puissance_kwc = str(record_fields.get("Puissance installée en kWc", "")).strip()
+        puissance_kwc_raw = record_fields.get("Puissance installée en kWc", "")
+        if isinstance(puissance_kwc_raw, (int, float)):
+            puissance_kwc = str(puissance_kwc_raw)
+        elif puissance_kwc_raw:
+            puissance_kwc = str(puissance_kwc_raw).strip()
+        else:
+            puissance_kwc = ""
 
         # Récupération du champ contrat abonné pour la référence
         contrat_abonne = str(record_fields.get("Contrat abonné", "")).strip()
