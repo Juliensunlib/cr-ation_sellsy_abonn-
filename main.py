@@ -302,10 +302,16 @@ class ClientSynchronizer:
         record_id = record.get('id', 'inconnu')
         
         logger.info(f"🔄 Début de synchronisation pour l'enregistrement : {record_id}")
-        
+
         # Réinitialiser le résultat de synchronisation
         self.sync_result = None
-        
+
+        # Vérification du champ "Contrat d'abonnement signé"
+        contrat_signe = record_fields.get("Contrat d'abonnement signé", False)
+        if not contrat_signe:
+            logger.info(f"⏩ Synchronisation ignorée pour {record_id} - Contrat d'abonnement non signé")
+            return
+
         # Préparation et validation des données
         formatted_data = self.sanitize_client_data(record_fields)
         
