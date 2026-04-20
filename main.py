@@ -306,10 +306,10 @@ class ClientSynchronizer:
         # Réinitialiser le résultat de synchronisation
         self.sync_result = None
 
-        # Vérification du champ "Contrat d'abonnement signé"
-        contrat_signe = record_fields.get("Contrat d'abonnement signé", False)
-        if not contrat_signe:
-            logger.info(f"⏩ Synchronisation ignorée pour {record_id} - Contrat d'abonnement non signé")
+        # Vérification du champ formule "Tag contrat signé"
+        tag_contrat = str(record_fields.get("Tag contrat signé", "")).strip()
+        if tag_contrat != "Contrat signé":
+            logger.info(f"⏩ Synchronisation ignorée pour {record_id} - Tag contrat signé = '{tag_contrat}'")
             return
 
         # Préparation et validation des données
