@@ -308,7 +308,7 @@ class ClientSynchronizer:
 
         # Vérification du champ formule "Tag contrat signé"
         tag_contrat = str(record_fields.get("Tag contrat signé", "")).strip()
-        if tag_contrat != "Contrat signé":
+        if tag_contrat.lower() != "contrat signé":
             logger.info(f"⏩ Synchronisation ignorée pour {record_id} - Tag contrat signé = '{tag_contrat}'")
             return
 
